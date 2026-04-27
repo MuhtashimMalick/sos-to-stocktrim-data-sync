@@ -94,6 +94,15 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER: EmailStr
     FIRST_SUPERUSER_PASSWORD: str
 
+    # SOS Inventory API credentials
+    CLIENT_ID: str
+    CLIENT_SECRET: str
+    REDIRECT_URI: str
+    SOS_USERNAME: str
+    SOS_PASSWORD: str
+    BASE_URL: str
+    TOKEN_FILE: str
+
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":
             message = (
