@@ -103,6 +103,11 @@ class Settings(BaseSettings):
     BASE_URL: str
     TOKEN_FILE: str
 
+    #STOCKTRIM Credentials
+    ST_AUTH_ID:str
+    ST_AUTH_SIGNATURE:str
+    ST_BASE_URL:str
+
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":
             message = (
