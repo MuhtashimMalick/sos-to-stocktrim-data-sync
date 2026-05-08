@@ -1,18 +1,21 @@
 from typing import Optional
 from pydantic import BaseModel
+
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
+
 from app.api.routes.stocktrim import client
+from app.sos_stocktrim_sync.utils import api_get
+
 router = APIRouter(prefix="/customer", tags=["customer"])
-import json
-import httpx
 # --- SOS Nested Model
+
 
 class SOSContact(BaseModel):
     title: Optional[str] = None
     firstName: Optional[str] = None
     lastName: Optional[str] = None
     suffix: Optional[str] = None
+
 
 class SOSAddress(BaseModel):
     line1: Optional[str] = None
@@ -24,6 +27,7 @@ class SOSAddress(BaseModel):
     stateProvince: Optional[str] = None
     postalCode: Optional[str] = None
     country: Optional[str] = None
+
 
 class SOSNamedRef(BaseModel):
     id: Optional[int] = None
@@ -68,15 +72,20 @@ def map_sos_customer_to_stocktrim(data: SOSCustomerRequest) -> dict:
 # --- Endpoint ---
 
 @router.put("/create-customer")
-async def create_customer(data: SOSCustomerRequest):
+async def create_customer():
     try:
-        stocktrim_payload = map_sos_customer_to_stocktrim(data)
+        customers = api_get(f"/api/v2/customer")
+        for customer in customers["data"]:
+            verified_customer = SOSCustomerRequest.model_validate(customer)
+            stocktrim_payload = map_sos_customer_to_stocktrim(
+                verified_customer)
 
-        result = await client.create_resource(
-            method="PUT",
-            endpoint="Customers",
-            payload=stocktrim_payload
-        )
+            result = await client.create_resource(
+                method="PUT",
+                endpoint="Customers",
+                payload=stocktrim_payload
+            )
+
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

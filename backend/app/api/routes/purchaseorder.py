@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
 from app.api.routes.stocktrim import client
-from app.sos_stocktrim_sync.utils import api_post
+from app.sos_stocktrim_sync.utils import api_get
 
 router = APIRouter(prefix="/purchaseorder", tags=["purchaseorder"])
 
@@ -41,16 +41,25 @@ class SOSTax(BaseModel):
 class SOSPOLine(BaseModel):
     id: int
     lineNumber: int
-    item: Optional[SOSNamedRef] = None      # item.name = SKU / productId in StockTrim
+    # item.name = SKU / productId in StockTrim
+    item: Optional[SOSNamedRef] = None
     vendorPartNumber: Optional[str] = None
     description: Optional[str] = None
     quantity: Optional[float] = 0
-    unitprice: Optional[float] = 0          # SOS field name is 'unitprice' (lowercase p)
+    # SOS field name is 'unitprice' (lowercase p)
+    unitprice: Optional[float] = 0
     amount: Optional[float] = 0
     received: Optional[float] = 0
     uom: Optional[SOSNamedRef] = None
     tax: Optional[SOSTax] = None
     duedate: Optional[str] = None
+
+
+class SOSLinkedReceipt(BaseModel):
+    id: int
+    transactionType: Optional[str] = None     # e.g. "IR"
+    refNumber: Optional[str] = None
+    lineNumber: Optional[int] = None
 
 
 class SOSPurchaseOrderRequest(BaseModel):
@@ -71,6 +80,9 @@ class SOSPurchaseOrderRequest(BaseModel):
     subTotal: Optional[float] = 0
     total: Optional[float] = 0
     lines: Optional[List[SOSPOLine]] = []
+    receivedStatus: Optional[str] = None
+    openAmount: Optional[float] = 0
+    linkedReceipts: Optional[List[SOSLinkedReceipt]] = []
 
 
 # ---------------------------------------------------------------------------
@@ -130,12 +142,14 @@ def map_sos_po_to_stocktrim(data: SOSPurchaseOrderRequest) -> dict:
     """
 
     # Determine status from SOS flags
-    if data.closed:
-        status = "Closed"
-    elif data.confirmed:
-        status = "Approved"
-    else:
+    if data.closed and data.receivedStatus == "All" and data.openAmount == 0:
+        status = "Received"
+    elif data.confirmed and (data.openAmount > 0 or bool(data.linkedReceipts)):
+        status = "Sent"
+    elif data.pendingApproval:
         status = "Draft"
+    else:
+        status = "Approved"
 
     # Build line items
     line_items = []
@@ -232,21 +246,26 @@ def map_stocktrim_po_to_sos(data: STCreatePORequest) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.post("/sync-from-sos")
-async def sync_purchase_order_from_sos(data: SOSPurchaseOrderRequest):
+async def sync_purchase_order_from_sos():
     """
     Receive a full SOS Purchase Order and push it to StockTrim as a single PO
     with all line items under purchaseOrderLineItems.
     """
     try:
-        payload = map_sos_po_to_stocktrim(data)
-        result = await client.create_resource(
-            method="POST",
-            endpoint="PurchaseOrders",
-            payload=payload,
-        )
+        purchase_orders = api_get("/api/v2/purchaseorder")
+
+        for purchase_order in purchase_orders["data"]:
+            verified_po = SOSPurchaseOrderRequest.model_validate(
+                purchase_order)
+            payload = map_sos_po_to_stocktrim(verified_po)
+            result = await client.create_resource(
+                method="POST",
+                endpoint="PurchaseOrders",
+                payload=payload,
+            )
         return {
-            "po_number": data.number,
-            "lines_synced": len(data.lines or []),
+            # "po_number": data.number,
+            # "lines_synced": len(data.lines or []),
             "status_sent": payload.get("status"),
             "result": result,
         }

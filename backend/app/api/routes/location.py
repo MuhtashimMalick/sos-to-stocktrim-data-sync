@@ -1,8 +1,10 @@
 from typing import Optional, List
 from pydantic import BaseModel
+
 from fastapi import APIRouter, HTTPException
 
 from app.api.routes.stocktrim import client
+from app.sos_stocktrim_sync.utils import api_get
 
 router = APIRouter(prefix="/location", tags=["location"])
 
@@ -42,7 +44,8 @@ class SOSLocationRequest(BaseModel):
 
 def map_sos_location_to_stocktrim(data: SOSLocationRequest) -> dict:
     return {
-        "locationCode": str(data.id),       # unique key — StockTrim upserts on this
+        # unique key — StockTrim upserts on this
+        "locationCode": str(data.id),
         "locationName": data.name,
         "externalId": str(data.id),         # store SOS id for traceability
     }
@@ -60,12 +63,15 @@ async def create_location(data: SOSLocationRequest):
     will update rather than duplicate.
     """
     try:
-        payload = map_sos_location_to_stocktrim(data)
-        result = await client.create_resource(
-            method="POST",
-            endpoint="Locations",
-            payload=payload,
-        )
+        locations = api_get(f"/api/v2/location")
+        for location in locations["data"]:
+            verified_location = SOSLocationRequest.model_validate(location)
+            payload = map_sos_location_to_stocktrim(verified_location)
+            result = await client.create_resource(
+                method="POST",
+                endpoint="Locations",
+                payload=payload,
+            )
         return {
             "location_id": data.id,
             "location_name": data.name,

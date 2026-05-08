@@ -1,3 +1,11 @@
+from app.core.config import settings
+import time
+import hashlib
+import hmac
+from typing import Dict, Any
+import httpx
+from typing import Optional
+from app.sos_stocktrim_sync.utils import api_get
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import json
@@ -5,22 +13,12 @@ import json
 from fastapi import APIRouter, HTTPException
 router = APIRouter(prefix="/stocktrim", tags=["stocktrim"])
 
-from typing import Optional
-
-import httpx
-from typing import Dict, Any
-import hmac
-import hashlib
-import time
-from app.core.config import settings
-
 
 class StockTrimClient:
-    def __init__(self,auth_id: str, auth_signature: str, base_url: str):
+    def __init__(self, auth_id: str, auth_signature: str, base_url: str):
         self.auth_id = auth_id
         self.auth_signature = auth_signature
         self.base_url = base_url
-        
 
     def _build_headers(self, method: str, endpoint: str, body: str = ""):
         return {
@@ -40,7 +38,8 @@ class StockTrimClient:
             response = await client.request(
                 method=method.upper(),
                 url=url,
-                json=payload if method.upper() in ["POST", "PUT", "PATCH"] else None,
+                json=payload if method.upper() in [
+                    "POST", "PUT", "PATCH"] else None,
                 params=payload if method.upper() == "GET" else None,
                 headers=headers
             )
@@ -50,19 +49,23 @@ class StockTrimClient:
 
         return response.json()
 
+
 client = StockTrimClient(
     auth_id=settings.ST_AUTH_ID,
     auth_signature=settings.ST_AUTH_SIGNATURE,
     base_url=settings.ST_BASE_URL
 )
 
+
 class VendorInfo(BaseModel):
     id: int
     name: str
 
+
 class CategoryInfo(BaseModel):
     id: int
     name: str
+
 
 class SOSItemRequest(BaseModel):
     sku: str
@@ -120,15 +123,20 @@ def map_sos_to_stocktrim(data: SOSItemRequest) -> dict:
 
 
 @router.post("/create-item")
-async def create_item(data: SOSItemRequest):
-    try:
-        stocktrim_payload = map_sos_to_stocktrim(data)
-
-        result = await client.create_resource(
-            method="POST",
-            endpoint="Products",
-            payload=stocktrim_payload
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def create_item():
+    items = api_get(f"/api/v2/item")
+    for item in items["data"]:
+        try:
+            print(item)
+            verified_item = SOSItemRequest.model_validate(item)
+            print(verified_item)
+            stocktrim_payload = map_sos_to_stocktrim(verified_item)
+            print(stocktrim_payload)
+            result = await client.create_resource(
+                method="POST",
+                endpoint="Products",
+                payload=stocktrim_payload
+            )
+        except Exception as e:
+            print(str(e))
+    return result

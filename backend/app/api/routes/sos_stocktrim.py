@@ -11,7 +11,7 @@ router = APIRouter(prefix="/sos-stocktrim", tags=["sos-stocktrim"])
 
 @router.post("/sync/{type}/")
 async def sync_sos_to_stocktrim(
-    session: SessionDep, current_user: CurrentUser, type: Literal["item", "customer", "vendor", ]
+    session: SessionDep, current_user: CurrentUser, type: Literal["item", "customer", "vendor", "salesorder", "purchaseorder", "location"]
 ) -> Any:
     """
     Sync items from SOS to StockTrim.

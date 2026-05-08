@@ -1,4 +1,5 @@
 from typing import Optional, List
+from app.sos_stocktrim_sync.utils import api_get
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
@@ -127,21 +128,24 @@ def map_sos_supplier_to_stocktrim(data: SOSSupplierRequest) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.post("/create-supplier")
-async def create_supplier(data: SOSSupplierRequest):
+async def create_supplier():
     """
     Receive a single SOS vendor and upsert it in StockTrim.
     StockTrim Suppliers endpoint requires a JSON array — single item is wrapped in [].
     """
     try:
-        payload = map_sos_supplier_to_stocktrim(data)
-        result = await client.create_resource(
-            method="POST",
-            endpoint="Suppliers",
-            payload=[payload],          # StockTrim requires array even for single supplier
-        )
+        vendors = api_get("/api/v2/vendor")
+        for vendor in vendors["data"]:
+            verified_vendor = SOSSupplierRequest.model_validate(vendor)
+            payload = map_sos_supplier_to_stocktrim(verified_vendor)
+            result = await client.create_resource(
+                method="POST",
+                endpoint="Suppliers",
+                payload=[payload],          # StockTrim requires array even for single supplier
+            )
         return {
-            "supplier_id": data.id,
-            "supplier_name": data.name,
+            # "supplier_id": data.id,
+            # "supplier_name": data.name,
             "result": result,
         }
     except Exception as e:

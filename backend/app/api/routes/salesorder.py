@@ -1,16 +1,19 @@
-from typing import Optional
 from pydantic import BaseModel
+from typing import Optional, List
+
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Any,List
+
 from app.api.routes.stocktrim import client
+from app.sos_stocktrim_sync.utils import api_get
+
 router = APIRouter(prefix="/salesorder", tags=["salesorder"])
-import json
-import httpx
 # --- SOS Nested Model
+
 
 class SOSNamedRef(BaseModel):
     id: Optional[int] = None
     name: Optional[str] = None
+
 
 class SOSAddress(BaseModel):
     line1: Optional[str] = None
@@ -20,15 +23,18 @@ class SOSAddress(BaseModel):
     postalCode: Optional[str] = None
     country: Optional[str] = None
 
+
 class SOSAddressBlock(BaseModel):
     company: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
     address: Optional[SOSAddress] = None
 
+
 class SOSTax(BaseModel):
     taxable: Optional[bool] = False
     taxCode: Optional[SOSNamedRef] = None
+
 
 class SOSOrderLine(BaseModel):
     id: int
@@ -88,20 +94,24 @@ def map_sos_order_to_stocktrim(data: SOSSalesOrderRequest) -> List[dict]:
 # --- Endpoint ---
 
 @router.post("/create-sales-order")
-async def create_sales_order(data: SOSSalesOrderRequest):
+async def create_sales_order():
     try:
-        stocktrim_payloads = map_sos_order_to_stocktrim(data)
+        sales_orders = api_get(f"/api/v2/salesorder")
+        for saleorder in sales_orders["data"]:
+            verified_saleorder = SOSSalesOrderRequest.model_validate(saleorder)
+            stocktrim_payloads = map_sos_order_to_stocktrim(verified_saleorder)
 
-        results = []
-        for payload in stocktrim_payloads:
-            result = await client.create_resource(
-                endpoint="SalesOrders",
-                payload=payload
-            )
-            results.append(result)
+            results = []
+            for payload in stocktrim_payloads:
+                result = await client.create_resource(
+                    method="POST",
+                    endpoint="SalesOrders",
+                    payload=payload
+                )
+                results.append(result)
 
         return {
-            "order": data.number,
+            # "order": data.number,
             "lines_created": len(results),
             "results": results
         }
