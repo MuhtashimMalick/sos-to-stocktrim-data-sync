@@ -79,7 +79,7 @@ async def create_customer():
             verified_customer = SOSCustomerRequest.model_validate(customer)
             stocktrim_payload = map_sos_customer_to_stocktrim(
                 verified_customer)
-
+            print(stocktrim_payload,"paylload")
             result = await client.create_resource(
                 method="PUT",
                 endpoint="Customers",
