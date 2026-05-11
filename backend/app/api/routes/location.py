@@ -56,7 +56,7 @@ def map_sos_location_to_stocktrim(data: SOSLocationRequest) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.post("/create-location")
-async def create_location(data: SOSLocationRequest):
+async def create_location():
     """
     Upsert a single SOS location into StockTrim.
     StockTrim matches on locationCode — re-syncing the same location
@@ -73,8 +73,8 @@ async def create_location(data: SOSLocationRequest):
                 payload=payload,
             )
         return {
-            "location_id": data.id,
-            "location_name": data.name,
+            # "location_id": data.id,
+            # "location_name": data.name,
             "result": result,
         }
     except Exception as e:
