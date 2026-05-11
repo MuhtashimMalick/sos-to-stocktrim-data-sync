@@ -68,6 +68,7 @@ class CategoryInfo(BaseModel):
 
 
 class SOSItemRequest(BaseModel):
+    id: int
     sku: str
     name: str
     barcode: Optional[str] = None
@@ -87,7 +88,7 @@ class SOSItemRequest(BaseModel):
 
 def map_sos_to_stocktrim(data: SOSItemRequest) -> dict:
     return {
-        "productId": data.sku,
+        "productId": data.id,
         "productCodeReadable": data.sku,
         "name": data.name,
         "category": data.category.name if data.category else None,
@@ -126,17 +127,18 @@ def map_sos_to_stocktrim(data: SOSItemRequest) -> dict:
 async def create_item():
     items = api_get(f"/api/v2/item")
     for item in items["data"]:
-        try:
-            print(item)
-            verified_item = SOSItemRequest.model_validate(item)
-            print(verified_item)
-            stocktrim_payload = map_sos_to_stocktrim(verified_item)
-            print(stocktrim_payload)
-            result = await client.create_resource(
-                method="POST",
-                endpoint="Products",
-                payload=stocktrim_payload
-            )
-        except Exception as e:
-            print(str(e))
+        if item["id"] == 88:
+            try:
+                print(item)
+                verified_item = SOSItemRequest.model_validate(item)
+                print(verified_item)
+                stocktrim_payload = map_sos_to_stocktrim(verified_item)
+                print(stocktrim_payload)
+                result = await client.create_resource(
+                    method="POST",
+                    endpoint="Products",
+                    payload=stocktrim_payload
+                )
+            except Exception as e:
+                print(str(e))
     return result

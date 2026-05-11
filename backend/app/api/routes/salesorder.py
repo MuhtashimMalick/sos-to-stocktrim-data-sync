@@ -97,18 +97,34 @@ def map_sos_order_to_stocktrim(data: SOSSalesOrderRequest) -> List[dict]:
 async def create_sales_order():
     try:
         sales_orders = api_get(f"/api/v2/salesorder")
-        for saleorder in sales_orders["data"]:
-            verified_saleorder = SOSSalesOrderRequest.model_validate(saleorder)
-            stocktrim_payloads = map_sos_order_to_stocktrim(verified_saleorder)
+        saleorder = sales_orders["data"][0]
+        print(saleorder)
+        verified_saleorder = SOSSalesOrderRequest.model_validate(saleorder)
+        stocktrim_payloads = map_sos_order_to_stocktrim(verified_saleorder)
+        print(stocktrim_payloads)
 
-            results = []
-            for payload in stocktrim_payloads:
-                result = await client.create_resource(
-                    method="POST",
-                    endpoint="SalesOrders",
-                    payload=payload
-                )
-                results.append(result)
+        results = []
+        for payload in stocktrim_payloads:
+            result = await client.create_resource(
+                method="POST",
+                endpoint="SalesOrders",
+                payload=payload
+            )
+            print(result)
+            results.append(result)
+        # for saleorder in sales_orders["data"]:
+        #     verified_saleorder = SOSSalesOrderRequest.model_validate(saleorder)
+        #     stocktrim_payloads = map_sos_order_to_stocktrim(verified_saleorder)
+
+        #     results = []
+        #     for payload in stocktrim_payloads:
+        #         result = await client.create_resource(
+        #             method="POST",
+        #             endpoint="SalesOrders",
+        #             payload=payload
+        #         )
+        #         print(result)
+        #         results.append(result)
 
         return {
             # "order": data.number,
