@@ -96,6 +96,7 @@ async def sync_salesorders_job():
     Core logic to sync sales orders from SOS to StockTrim.
     This function can be called by both the endpoint and scheduler.
     """
+    print("starting")
     sales_orders = api_get(f"/api/v2/salesorder")
     saleorder = sales_orders["data"][0]
     print(saleorder)

@@ -24,7 +24,7 @@ def setup_scheduled_jobs():
     register_job(
         job_id="sync_salesorder",
         func=sync_salesorders,
-        minutes=5,
+        minutes=60,
         name="Sync Sales Orders from SOS to StockTrim"
     )
     

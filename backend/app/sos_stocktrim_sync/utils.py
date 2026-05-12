@@ -276,16 +276,60 @@ def get_access_token() -> str:
     return tokens["access_token"]
 
 
-def api_get(endpoint: str, params: dict = None) -> dict:
-    """Authenticated GET against the SOS v2 API. e.g. api_get('/api/v2/item')"""
+# def api_get(endpoint: str, params: dict = None) -> dict:
+#     """Authenticated GET against the SOS v2 API. e.g. api_get('/api/v2/item')"""
+#     token = get_access_token()
+
+#     resp = requests.get(
+#         f"{BASE_URL}{endpoint}",
+#         headers={"Authorization": f"Bearer {token}"},
+#         params=params,
+#     )
+#     resp.raise_for_status()
+#     return resp.json()
+from typing import Dict, Any
+
+def api_get(endpoint: str, params: Dict[str, Any] = None):
+    """
+    Call SOS v2 API with pagination (start/maxresults) and return all items as a list.
+    Usage: api_get("/api/v2/customer") or api_get("/api/v2/salesorder")
+    """
+
     token = get_access_token()
-    resp = requests.get(
-        f"{BASE_URL}{endpoint}",
-        headers={"Authorization": f"Bearer {token}"},
-        params=params,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    if params is None:
+        params = {}
+
+    items = []
+    start = 0
+    maxresults = 200 
+
+    while True:
+    
+        page_params = {**params, "start": start, "maxresults": maxresults}
+
+        resp = requests.get(
+            f"{BASE_URL}{endpoint}",
+            headers={"Authorization": f"Bearer {token}"},
+            params=page_params,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Extract items; adjust key if SOS uses "results" or just top‑level list
+        batch = data.get("data") or data.get("results") or data
+        if not isinstance(batch, (list, tuple)):
+            batch = []
+
+        items.extend(batch)
+        # break
+
+        if len(batch) < maxresults:
+            break
+
+        start += maxresults
+        time.sleep(0.6) 
+    print(items)
+    return {"data": items}  
 
 
 def api_post(endpoint: str, payload: dict = None) -> dict:
