@@ -9,13 +9,18 @@ Set your credentials in a .env file or as environment variables:
 Tokens are cached in sos_tokens.json and refreshed automatically.
 """
 
+
+import asyncio
+import httpx
 import json
 import os
+import requests
 import time
+
+from bs4 import BeautifulSoup
+from typing import Any, Dict
 from urllib.parse import urlparse, parse_qs
 
-import requests
-from bs4 import BeautifulSoup
 from app.core.config import settings
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -27,6 +32,9 @@ SOS_USERNAME = settings.SOS_USERNAME
 SOS_PASSWORD = settings.SOS_PASSWORD
 BASE_URL = settings.BASE_URL
 TOKEN_FILE = settings.TOKEN_FILE
+
+MAX_RESULTS = 5
+MAX_CONCURRENT_REQUESTS = 1
 
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -287,49 +295,100 @@ def get_access_token() -> str:
 #     )
 #     resp.raise_for_status()
 #     return resp.json()
-from typing import Dict, Any
 
-def api_get(endpoint: str, params: Dict[str, Any] = None):
+
+async def fetch_page(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    token: str,
+    params: Dict[str, Any],
+    start: int,
+    maxresults: int,
+):
+    response = await client.get(
+        f"{BASE_URL}{endpoint}",
+        headers={"Authorization": f"Bearer {token}"},
+        params={
+            **params,
+            "start": start,
+            "maxresults": maxresults,
+        },
+    )
+
+    print(response.url)
+    print(response.status_code)
+
+    # Helpful for debugging throttling
+    if response.status_code != 200:
+        print(response.text)
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+async def api_get(
+    endpoint: str,
+    params: Dict[str, Any] | None = None,
+):
     """
-    Call SOS v2 API with pagination (start/maxresults) and return all items as a list.
-    Usage: api_get("/api/v2/customer") or api_get("/api/v2/salesorder")
+    Fetch all paginated data from SOS API
+    with limited concurrency to avoid throttling.
     """
 
-    token = get_access_token()
     if params is None:
         params = {}
 
-    items = []
-    start = 0
-    maxresults = 200 
+    token = get_access_token()
 
-    while True:
-    
-        page_params = {**params, "start": start, "maxresults": maxresults}
+    async with httpx.AsyncClient(timeout=30.0) as client:
 
-        resp = requests.get(
-            f"{BASE_URL}{endpoint}",
-            headers={"Authorization": f"Bearer {token}"},
-            params=page_params,
+        # First request
+        first_page = await fetch_page(
+            client=client,
+            endpoint=endpoint,
+            token=token,
+            params=params,
+            start=0,
+            maxresults=MAX_RESULTS,
         )
-        resp.raise_for_status()
-        data = resp.json()
 
-        # Extract items; adjust key if SOS uses "results" or just top‑level list
-        batch = data.get("data") or data.get("results") or data
-        if not isinstance(batch, (list, tuple)):
-            batch = []
+        items = first_page.get("data", []) or []
+        total_count = first_page.get("totalCount", 0)
 
-        items.extend(batch)
-        # break
+        # Remaining offsets
+        starts = range(MAX_RESULTS, total_count, MAX_RESULTS)
 
-        if len(batch) < maxresults:
-            break
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
-        start += maxresults
-        time.sleep(0.6) 
-    print(items)
-    return {"data": items}  
+        async def limited_fetch(start: int):
+            async with semaphore:
+
+                # Tiny delay helps avoid SOS throttling
+                # await asyncio.sleep(0.6)
+
+                return await fetch_page(
+                    client=client,
+                    endpoint=endpoint,
+                    token=token,
+                    params=params,
+                    start=start,
+                    maxresults=MAX_RESULTS,
+                )
+
+        tasks = [
+            limited_fetch(start)
+            for start in starts
+        ]
+
+        if tasks:
+            results = await asyncio.gather(*tasks)
+
+            for result in results:
+                # print(result)
+                items.extend(result.get("data", []) or [])
+
+        return {"data": items}
 
 
 def api_post(endpoint: str, payload: dict = None) -> dict:

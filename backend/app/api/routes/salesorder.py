@@ -1,6 +1,9 @@
-from pydantic import BaseModel
-from typing import Optional, List
+import asyncio
+import logging
 
+from typing import Any, Optional, List
+
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
 from app.api.routes.stocktrim import client
@@ -91,41 +94,126 @@ def map_sos_order_to_stocktrim(data: SOSSalesOrderRequest) -> List[dict]:
     return records
 
 
-async def sync_salesorders_job():
-    """
-    Core logic to sync sales orders from SOS to StockTrim.
-    This function can be called by both the endpoint and scheduler.
-    """
-    print("starting")
-    sales_orders = api_get(f"/api/v2/salesorder")
-    saleorder = sales_orders["data"][0]
-    print(saleorder)
-    verified_saleorder = SOSSalesOrderRequest.model_validate(saleorder)
-    stocktrim_payloads = map_sos_order_to_stocktrim(verified_saleorder)
-    print(stocktrim_payloads)
+STOCKTRIM_CONCURRENCY = 5
+logger = logging.getLogger(__name__)
 
-    results = []
-    for payload in stocktrim_payloads:
-        result = await client.create_resource(
-            method="POST",
-            endpoint="SalesOrders",
-            payload=payload
-        )
-        print(result)
-        results.append(result)
+
+async def sync_sales_orders_to_stocktrim(
+    sales_orders: dict[str, Any | list]
+):
+    semaphore = asyncio.Semaphore(STOCKTRIM_CONCURRENCY)
+
+    async def process_sales_order(saleorder):
+
+        try:
+            verified_saleorder = SOSSalesOrderRequest.model_validate(
+                saleorder
+            )
+
+            stocktrim_payloads = map_sos_order_to_stocktrim(
+                verified_saleorder
+            )
+
+            payload_results = []
+
+            # One SOS sales order may create multiple StockTrim payloads
+            for payload in stocktrim_payloads:
+
+                try:
+                    async with semaphore:
+                        result = await client.create_resource(
+                            method="POST",
+                            endpoint="SalesOrders",
+                            payload=payload,
+                        )
+
+                    payload_results.append({
+                        "status": "success",
+                        "result": result,
+                        "sales_order_number": payload.get("salesOrderNumber"),
+                    })
+
+                except Exception as e:
+                    logger.error(
+                        "Failed to sync sales order payload to StockTrim",
+                        extra={
+                            "error": str(e),
+                            "payload": payload,
+                            "sales_order_number": payload.get("salesOrderNumber"),
+                        },
+                    )
+
+                    payload_results.append({
+                        "status": "failed",
+                        "error": str(e),
+                        "payload": payload,
+                        "sales_order_number": payload.get("salesOrderNumber"),
+                    })
+
+            return {
+                "status": "completed",
+                "results": payload_results,
+            }
+
+        except Exception as e:
+            logger.error(
+                "Failed to process sales order",
+                extra={
+                    "error": str(e),
+                    "sales_order": saleorder,
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": str(e),
+                "sales_order": saleorder,
+            }
+
+    tasks = [
+        process_sales_order(saleorder)
+        for saleorder in sales_orders["data"]
+    ]
+
+    results = await asyncio.gather(*tasks)
+
+    success = 0
+    failed = 0
+
+    for order in results:
+
+        if order["status"] == "failed":
+            failed += 1
+            continue
+
+        for r in order["results"]:
+            if r["status"] == "success":
+                success += 1
+            else:
+                failed += 1
 
     return {
-        "lines_created": len(results),
-        "results": results
+        "success": success,
+        "failed": failed,
     }
 
 
 # --- Endpoint ---
 
+
 @router.post("/create-sales-order")
 async def create_sales_order():
+
     try:
-        result = await sync_salesorders_job()
-        return result
+        sales_orders = await api_get("/api/v2/salesorder")
+
+        result = await sync_sales_orders_to_stocktrim(
+            sales_orders
+        )
+
+        return {
+            "sales_order_sync_result": result
+        }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

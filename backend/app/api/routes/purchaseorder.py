@@ -1,4 +1,8 @@
-from typing import Optional, List
+import asyncio
+import logging
+
+from typing import Any, Optional, List
+
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
@@ -245,30 +249,93 @@ def map_stocktrim_po_to_sos(data: STCreatePORequest) -> dict:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
+STOCKTRIM_CONCURRENCY = 5
+logger = logging.getLogger(__name__)
+
+
+async def sync_purchase_orders_to_stocktrim(
+    purchase_orders: dict[str, Any | list]
+):
+    semaphore = asyncio.Semaphore(STOCKTRIM_CONCURRENCY)
+
+    async def process_purchase_order(purchase_order):
+        verified_po = SOSPurchaseOrderRequest.model_validate(
+            purchase_order
+        )
+
+        payload = map_sos_po_to_stocktrim(verified_po)
+
+        try:
+            async with semaphore:
+                result = await client.create_resource(
+                    method="POST",
+                    endpoint="PurchaseOrders",
+                    payload=payload,
+                )
+
+            return {
+                "status": "success",
+                "purchase_order_number": payload.get("purchaseOrderNumber"),
+                "stocktrim_status": payload.get("status"),
+                "result": result,
+            }
+
+        except Exception as e:
+            logger.error(
+                "Failed to sync purchase order to StockTrim",
+                extra={
+                    "error": str(e),
+                    "payload": payload,
+                    "purchase_order_number": payload.get("purchaseOrderNumber"),
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": str(e),
+                "payload": payload,
+                "purchase_order_number": payload.get("purchaseOrderNumber"),
+            }
+
+    tasks = [
+        process_purchase_order(po)
+        for po in purchase_orders["data"]
+    ]
+
+    results = await asyncio.gather(*tasks)
+
+    success = sum(
+        1 for r in results if r["status"] == "success"
+    )
+
+    failed = sum(
+        1 for r in results if r["status"] == "failed"
+    )
+
+    return {
+        "success": success,
+        "failed": failed,
+    }
+
+
 @router.post("/sync-from-sos")
 async def sync_purchase_order_from_sos():
     """
-    Receive a full SOS Purchase Order and push it to StockTrim as a single PO
-    with all line items under purchaseOrderLineItems.
+    Sync SOS purchase orders into StockTrim concurrently.
     """
-    try:
-        purchase_orders = api_get("/api/v2/purchaseorder")
 
-        for purchase_order in purchase_orders["data"]:
-            verified_po = SOSPurchaseOrderRequest.model_validate(
-                purchase_order)
-            payload = map_sos_po_to_stocktrim(verified_po)
-            result = await client.create_resource(
-                method="POST",
-                endpoint="PurchaseOrders",
-                payload=payload,
-            )
+    try:
+        purchase_orders = await api_get("/api/v2/purchaseorder")
+
+        sync_result = await sync_purchase_orders_to_stocktrim(
+            purchase_orders
+        )
+
         return {
-            # "po_number": data.number,
-            # "lines_synced": len(data.lines or []),
-            "status_sent": payload.get("status"),
-            "result": result,
+            "purchase_order_sync_result": sync_result
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

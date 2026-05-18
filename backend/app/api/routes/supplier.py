@@ -1,16 +1,22 @@
-from typing import Optional, List
-from app.sos_stocktrim_sync.utils import api_get
+import asyncio
+
+import logging
+from typing import Any, Optional
+
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
 from app.api.routes.stocktrim import client
+from app.sos_stocktrim_sync.utils import api_get
 
 router = APIRouter(prefix="/supplier", tags=["supplier"])
 
+STOCKTRIM_CONCURRENCY = 5
 
 # ---------------------------------------------------------------------------
 # SOS Inventory Models — mirrors the full SOS vendor/supplier response
 # ---------------------------------------------------------------------------
+
 
 class SOSNamedRef(BaseModel):
     id: Optional[int] = None
@@ -47,7 +53,8 @@ class SOSSupplierRequest(BaseModel):
     fax: Optional[str] = None
     website: Optional[str] = None
     contact: Optional[SOSContact] = None
-    address: Optional[SOSAddress] = None        # SOS vendor address is top-level (not nested in billing)
+    # SOS vendor address is top-level (not nested in billing)
+    address: Optional[SOSAddress] = None
     terms: Optional[SOSNamedRef] = None
     currency: Optional[SOSNamedRef] = None
     taxCode: Optional[SOSNamedRef] = None
@@ -79,7 +86,8 @@ class SOSSupplierRequest(BaseModel):
 
 def map_sos_supplier_to_stocktrim(data: SOSSupplierRequest) -> dict:
     payload: dict = {
-        "supplierCode": str(data.id),   # StockTrim requires supplierCode not supplierId
+        # StockTrim requires supplierCode not supplierId
+        "supplierCode": str(data.id),
         "supplierName": data.name,
     }
 
@@ -126,65 +134,66 @@ def map_sos_supplier_to_stocktrim(data: SOSSupplierRequest) -> dict:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
+
+
+async def sync_supplier_to_stocktrim(vendors: dict[str, Any | list]):
+    semaphore = asyncio.Semaphore(STOCKTRIM_CONCURRENCY)
+
+    async def process_vendor(vendor):
+        verified_vendor = SOSSupplierRequest.model_validate(vendor)
+        payload = map_sos_supplier_to_stocktrim(verified_vendor)
+
+        try:
+            async with semaphore:
+                result = await client.create_resource(
+                    method="POST",
+                    endpoint="Suppliers",
+                    payload=[payload],
+                )
+
+            return {"status": "success", "result": result}
+
+        except Exception as e:
+            # 🔥 IMPORTANT: log full context
+            logger.error(
+                "Failed to sync supplier to StockTrim",
+                extra={
+                    "error": str(e),
+                    "payload": payload,
+                    "vendor_id": vendor.get("id"),
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": str(e),
+                "payload": payload,
+                "vendor_id": vendor.get("id"),
+            }
+
+    tasks = [process_vendor(v) for v in vendors["data"]]
+
+    results = await asyncio.gather(*tasks)
+
+    success = sum(1 for r in results if r["status"] == "success")
+    failed = sum(1 for r in results if r["status"] == "failed")
+
+    return {
+        "success": success,
+        "failed": failed,
+    }
+
 
 @router.post("/create-supplier")
 async def create_supplier():
     """
-    Receive a single SOS vendor and upsert it in StockTrim.
-    StockTrim Suppliers endpoint requires a JSON array — single item is wrapped in [].
+    Receive SOS vendors and upsert them into StockTrim concurrently.
     """
     try:
-        vendors = api_get("/api/v2/vendor")
-        for vendor in vendors["data"]:
-            verified_vendor = SOSSupplierRequest.model_validate(vendor)
-            payload = map_sos_supplier_to_stocktrim(verified_vendor)
-            result = await client.create_resource(
-                method="POST",
-                endpoint="Suppliers",
-                payload=[payload],          # StockTrim requires array even for single supplier
-            )
-        return {
-            # "supplier_id": data.id,
-            # "supplier_name": data.name,
-            "result": result,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        vendors = await api_get("/api/v2/vendor")
+        sync_result = {"supplier_sync_result": await sync_supplier_to_stocktrim(vendors)}
+        return sync_result
 
-
-@router.post("/bulk-sync")
-async def bulk_sync_suppliers(suppliers: List[SOSSupplierRequest]):
-    """
-    Bulk upsert all SOS vendors into StockTrim.
-    Skips archived vendors automatically.
-    Use for initial data load or full re-sync.
-    """
-    try:
-        results = []
-        skipped = []
-
-        for supplier in suppliers:
-            if supplier.archived:
-                skipped.append({"supplier_id": supplier.id, "supplier_name": supplier.name})
-                continue
-
-            payload = map_sos_supplier_to_stocktrim(supplier)
-            result = await client.create_resource(
-                method="POST",
-                endpoint="Suppliers",
-                payload=[payload],
-            )
-            results.append({
-                "supplier_id": supplier.id,
-                "supplier_name": supplier.name,
-                "result": result,
-            })
-
-        return {
-            "total_synced": len(results),
-            "total_skipped_archived": len(skipped),
-            "results": results,
-            "skipped": skipped,
-        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

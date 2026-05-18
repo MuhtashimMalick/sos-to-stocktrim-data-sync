@@ -1,16 +1,16 @@
-from app.core.config import settings
-import time
-import hashlib
-import hmac
-from typing import Dict, Any
+import asyncio
 import httpx
-from typing import Optional
-from app.sos_stocktrim_sync.utils import api_get
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 import json
+import logging
 
+from typing import Dict, Any, Optional
+
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
+
+from app.core.config import settings
+from app.sos_stocktrim_sync.utils import api_get
+
 router = APIRouter(prefix="/stocktrim", tags=["stocktrim"])
 
 
@@ -19,6 +19,7 @@ class StockTrimClient:
         self.auth_id = auth_id
         self.auth_signature = auth_signature
         self.base_url = base_url
+        self.http = httpx.AsyncClient()
 
     def _build_headers(self, method: str, endpoint: str, body: str = ""):
         return {
@@ -34,15 +35,14 @@ class StockTrimClient:
 
         headers = self._build_headers(method, endpoint, body_str)
 
-        async with httpx.AsyncClient() as client:
-            response = await client.request(
-                method=method.upper(),
-                url=url,
-                json=payload if method.upper() in [
-                    "POST", "PUT", "PATCH"] else None,
-                params=payload if method.upper() == "GET" else None,
-                headers=headers
-            )
+        response = await self.http.request(
+            method=method.upper(),
+            url=url,
+            json=payload if method.upper() in [
+                "POST", "PUT", "PATCH"] else None,
+            params=payload if method.upper() == "GET" else None,
+            headers=headers
+        )
 
         if response.status_code >= 400:
             raise Exception(f"{response.status_code}: {response.text}")
@@ -123,22 +123,85 @@ def map_sos_to_stocktrim(data: SOSItemRequest) -> dict:
     }
 
 
-@router.post("/create-item")
-async def create_item():
-    items = api_get(f"/api/v2/item")
-    for item in items["data"]:
-        if item["id"] == 88:
-            try:
-                print(item)
-                verified_item = SOSItemRequest.model_validate(item)
-                print(verified_item)
-                stocktrim_payload = map_sos_to_stocktrim(verified_item)
-                print(stocktrim_payload)
+logger = logging.getLogger(__name__)
+STOCKTRIM_CONCURRENCY = 5
+
+
+async def sync_items_to_stocktrim(items: dict[str, Any | list]):
+    semaphore = asyncio.Semaphore(STOCKTRIM_CONCURRENCY)
+
+    async def process_item(item):
+        try:
+            verified_item = SOSItemRequest.model_validate(item)
+
+            payload = map_sos_to_stocktrim(verified_item)
+
+            async with semaphore:
                 result = await client.create_resource(
                     method="POST",
                     endpoint="Products",
-                    payload=stocktrim_payload
+                    payload=payload,
                 )
-            except Exception as e:
-                print(str(e))
-    return result
+
+            return {
+                "status": "success",
+                "item_id": item.get("id"),
+                "sku": payload.get("code"),
+                "result": result,
+            }
+
+        except Exception as e:
+            logger.error(
+                "Failed to sync item to StockTrim",
+                extra={
+                    "error": str(e),
+                    "payload": item,
+                    "item_id": item.get("id"),
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": str(e),
+                "item_id": item.get("id"),
+                "payload": item,
+            }
+
+    tasks = [
+        process_item(item)
+        for item in items["data"]
+    ]
+
+    results = await asyncio.gather(*tasks)
+
+    success = sum(
+        1 for r in results if r["status"] == "success"
+    )
+
+    failed = sum(
+        1 for r in results if r["status"] == "failed"
+    )
+
+    return {
+        "success": success,
+        "failed": failed,
+    }
+
+
+@router.post("/create-item")
+async def create_item():
+    """
+    Sync SOS items into StockTrim concurrently.
+    """
+
+    try:
+        items = await api_get("/api/v2/item")
+
+        sync_result = await sync_items_to_stocktrim(items)
+
+        return {
+            "item_sync_result": sync_result
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

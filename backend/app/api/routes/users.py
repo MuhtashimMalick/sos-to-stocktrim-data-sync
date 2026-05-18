@@ -18,6 +18,9 @@ from app.models import (
     UpdatePassword,
     User,
     UserCreate,
+    UserPreference,
+    UserPreferenceRead,
+    UserPreferenceUpdate,
     UserPublic,
     UserRegister,
     UsersPublic,
@@ -43,7 +46,8 @@ def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     count = session.exec(count_statement).one()
 
     statement = (
-        select(User).order_by(col(User.created_at).desc()).offset(skip).limit(limit)
+        select(User).order_by(col(User.created_at).desc()
+                              ).offset(skip).limit(limit)
     )
     users = session.exec(statement).all()
 
@@ -87,7 +91,8 @@ def update_user_me(
     """
 
     if user_in.email:
-        existing_user = crud.get_user_by_email(session=session, email=user_in.email)
+        existing_user = crud.get_user_by_email(
+            session=session, email=user_in.email)
         if existing_user and existing_user.id != current_user.id:
             raise HTTPException(
                 status_code=409, detail="User with this email already exists"
@@ -107,7 +112,8 @@ def update_password_me(
     """
     Update own password.
     """
-    verified, _ = verify_password(body.current_password, current_user.hashed_password)
+    verified, _ = verify_password(
+        body.current_password, current_user.hashed_password)
     if not verified:
         raise HTTPException(status_code=400, detail="Incorrect password")
     if body.current_password == body.new_password:
@@ -201,13 +207,15 @@ def update_user(
             detail="The user with this id does not exist in the system",
         )
     if user_in.email:
-        existing_user = crud.get_user_by_email(session=session, email=user_in.email)
+        existing_user = crud.get_user_by_email(
+            session=session, email=user_in.email)
         if existing_user and existing_user.id != user_id:
             raise HTTPException(
                 status_code=409, detail="User with this email already exists"
             )
 
-    db_user = crud.update_user(session=session, db_user=db_user, user_in=user_in)
+    db_user = crud.update_user(
+        session=session, db_user=db_user, user_in=user_in)
     return db_user
 
 
@@ -230,3 +238,58 @@ def delete_user(
     session.delete(user)
     session.commit()
     return Message(message="User deleted successfully")
+
+
+@router.get("/me/preference", response_model=UserPreferenceRead)
+def get_my_preferences(
+    session: SessionDep,
+):
+    current_user_id = "d076cffe-832e-45dc-adbd-09b4d189460e"
+    stmt = select(UserPreference).where(
+        UserPreference.user_id == current_user_id)
+    pref = session.exec(stmt).first()
+
+    if not pref:
+        pref = UserPreference(
+            user_id=current_user_id,
+            sync_after_mins=60,
+            enable_auto_sync=True,
+        )
+        session.add(pref)
+        session.commit()
+        session.refresh(pref)
+
+    return pref
+
+
+@router.put("/me/preference", response_model=UserPreferenceRead)
+def update_my_preferences(
+    payload: UserPreferenceUpdate,
+    session: SessionDep,
+):
+    current_user_id = "d076cffe-832e-45dc-adbd-09b4d189460e"
+    stmt = select(UserPreference).where(
+        UserPreference.user_id == current_user_id)
+    pref = session.exec(stmt).first()
+
+    if not pref:
+        pref = UserPreference(
+            user_id=current_user_id,
+            sync_after_mins=60,
+            enable_auto_sync=True,
+        )
+        session.add(pref)
+        session.commit()
+        session.refresh(pref)
+
+    if payload.sync_after_mins is not None:
+        pref.sync_after_mins = payload.sync_after_mins
+
+    if payload.enable_auto_sync is not None:
+        pref.enable_auto_sync = payload.enable_auto_sync
+
+    session.add(pref)
+    session.commit()
+    session.refresh(pref)
+
+    return pref

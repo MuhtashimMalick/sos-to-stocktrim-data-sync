@@ -1,6 +1,9 @@
-from typing import Optional
-from pydantic import BaseModel
+import asyncio
+import logging
 
+from typing import Any, Optional
+
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
 from app.api.routes.stocktrim import client
@@ -69,23 +72,78 @@ def map_sos_customer_to_stocktrim(data: SOSCustomerRequest) -> dict:
     }
 
 
+STOCKTRIM_CONCURRENCY = 5
+
+logger = logging.getLogger(__name__)
+
+
+async def sync_customer_to_stocktrim(customers: dict[str, Any | list]):
+    semaphore = asyncio.Semaphore(STOCKTRIM_CONCURRENCY)
+
+    async def process_customer(customer):
+        verified_customer = SOSCustomerRequest.model_validate(customer)
+        payload = map_sos_customer_to_stocktrim(verified_customer)
+
+        try:
+            async with semaphore:
+                result = await client.create_resource(
+                    method="PUT",
+                    endpoint="Customers",
+                    payload=payload,
+                )
+
+            return {
+                "status": "success",
+                "result": result,
+                "customer_id": customer.get("id"),
+            }
+
+        except Exception as e:
+            logger.error(
+                "Failed to sync customer to StockTrim",
+                extra={
+                    "error": str(e),
+                    "payload": payload,
+                    "customer_id": customer.get("id"),
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": str(e),
+                "payload": payload,
+                "customer_id": customer.get("id"),
+            }
+
+    tasks = [process_customer(c) for c in customers["data"]]
+
+    results = await asyncio.gather(*tasks)
+
+    success = sum(1 for r in results if r["status"] == "success")
+    failed = sum(1 for r in results if r["status"] == "failed")
+
+    return {
+        "success": success,
+        "failed": failed,
+    }
+
+
 # --- Endpoint ---
 
 @router.put("/create-customer")
 async def create_customer():
-    try:
-        customers = api_get(f"/api/v2/customer")
-        for customer in customers["data"]:
-            verified_customer = SOSCustomerRequest.model_validate(customer)
-            stocktrim_payload = map_sos_customer_to_stocktrim(
-                verified_customer)
-            print(stocktrim_payload,"paylload")
-            result = await client.create_resource(
-                method="PUT",
-                endpoint="Customers",
-                payload=stocktrim_payload
-            )
+    """
+    Sync SOS customers into StockTrim concurrently.
+    """
 
-        return result
+    try:
+        customers = await api_get("/api/v2/customer")
+
+        sync_result = await sync_customer_to_stocktrim(customers)
+
+        return {
+            "customer_sync_result": sync_result
+        }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,6 +1,10 @@
-from typing import Optional, List
-from pydantic import BaseModel
+from app.logging_config import get_jsonl_logger, build_jsonl_entry
+import asyncio
+import logging
 
+from typing import Any, Optional
+
+from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
 from app.api.routes.stocktrim import client
@@ -51,72 +55,92 @@ def map_sos_location_to_stocktrim(data: SOSLocationRequest) -> dict:
     }
 
 
+STOCKTRIM_CONCURRENCY = 5
+logger = logging.getLogger(__name__)
+
+
+async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
+    semaphore = asyncio.Semaphore(STOCKTRIM_CONCURRENCY)
+
+    async def process_location(location):
+        verified_location = SOSLocationRequest.model_validate(location)
+        payload = map_sos_location_to_stocktrim(verified_location)
+
+        try:
+            async with semaphore:
+                result = await client.create_resource(
+                    method="POST",
+                    endpoint="Locations",
+                    # ⚠️ no list here (as per your API design)
+                    payload=payload,
+                )
+
+            return {
+                "status": "success",
+                "result": result,
+                "location_code": location.get("locationCode"),
+            }
+
+        except Exception as e:
+            logger.error(
+                "Failed to sync location to StockTrim",
+                extra={
+                    "error": str(e),
+                    "payload": payload,
+                    "location_code": location.get("locationCode"),
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": str(e),
+                "payload": payload,
+                "location_code": location.get("locationCode"),
+            }
+
+    tasks = [process_location(l) for l in locations["data"]]
+
+    results = await asyncio.gather(*tasks)
+
+    success = sum(1 for r in results if r["status"] == "success")
+    failed = sum(1 for r in results if r["status"] == "failed")
+
+    return {
+        "success": success,
+        "failed": failed,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
+jsonl_logger = get_jsonl_logger()
+
+
 @router.post("/create-location")
 async def create_location():
     """
-    Upsert a single SOS location into StockTrim.
-    StockTrim matches on locationCode — re-syncing the same location
-    will update rather than duplicate.
+    Upsert SOS locations into StockTrim concurrently.
     """
+
     try:
-        locations = api_get(f"/api/v2/location")
-        for location in locations["data"]:
-            verified_location = SOSLocationRequest.model_validate(location)
-            payload = map_sos_location_to_stocktrim(verified_location)
-            result = await client.create_resource(
-                method="POST",
-                endpoint="Locations",
-                payload=payload,
+        locations = await api_get("/api/v2/location")
+        jsonl_logger.info(
+            build_jsonl_entry(
+                action_type="Fetch locations from SOS Inventory",
+                action_variant="fetch-locations-from-sos-inventory",
+                status="Info",
+                message=f"Fetched {len(locations['data'])} locations from SOS Inventory",
             )
-        return {
-            # "location_id": data.id,
-            # "location_name": data.name,
-            "result": result,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        )
 
-
-@router.post("/bulk-sync")
-async def bulk_sync_locations(locations: List[SOSLocationRequest]):
-    """
-    Bulk upsert all SOS locations into StockTrim.
-    Archived locations are skipped automatically.
-    Use for initial setup or full re-sync.
-    """
-    try:
-        results = []
-        skipped = []
-
-        for location in locations:
-            if location.archived:
-                skipped.append({
-                    "location_id": location.id,
-                    "location_name": location.name,
-                })
-                continue
-
-            payload = map_sos_location_to_stocktrim(location)
-            result = await client.create_resource(
-                method="POST",
-                endpoint="Locations",
-                payload=payload,
-            )
-            results.append({
-                "location_id": location.id,
-                "location_name": location.name,
-                "result": result,
-            })
+        sync_result = await sync_location_to_stocktrim(locations)
 
         return {
-            "total_synced": len(results),
-            "total_skipped_archived": len(skipped),
-            "results": results,
-            "skipped": skipped,
+            "location_sync_result": sync_result
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
