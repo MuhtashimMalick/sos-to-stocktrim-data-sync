@@ -7,8 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.main import api_router
 from app.core.config import settings
 from app.core.scheduler import register_job, start_scheduler, shutdown_scheduler
-from app.core.sync_jobs import sync_salesorders, sync_customers, sync_purchase_orders, sync_inventory_items
-
+from app.api.routes.sos_stocktrim import sync_all_data_to_stocktrim
 
 def custom_generate_unique_id(route: APIRoute) -> str:
     return f"{route.tags[0]}-{route.name}"
@@ -19,13 +18,13 @@ if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
 
 
 # Register all scheduled jobs
-def setup_scheduled_jobs():
+def setup_scheduled_jobs(minutes: int = 60) -> None:
     """Register all scheduled sync jobs."""
     register_job(
-        job_id="sync_salesorder",
-        func=sync_salesorders,
-        minutes=60,
-        name="Sync Sales Orders from SOS to StockTrim"
+        job_id="sync_all_data",
+        func=sync_all_data_to_stocktrim,
+        minutes=minutes,
+        name="Sync all data from SOS to StockTrim"
     )
     
     # Uncomment below when customer, purchase order, and inventory sync are ready
@@ -54,7 +53,7 @@ def setup_scheduled_jobs():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Setup and start the scheduler
-    setup_scheduled_jobs()
+    setup_scheduled_jobs(minutes=60)
     await start_scheduler()
     yield
     # Shutdown: Shutdown the scheduler

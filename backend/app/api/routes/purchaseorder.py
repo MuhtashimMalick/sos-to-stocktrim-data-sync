@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
+from app.logging_config import get_jsonl_logger, build_jsonl_entry
 
 router = APIRouter(prefix="/purchaseorder", tags=["purchaseorder"])
 
@@ -252,6 +253,7 @@ def map_stocktrim_po_to_sos(data: STCreatePORequest) -> dict:
 
 STOCKTRIM_CONCURRENCY = 5
 logger = logging.getLogger(__name__)
+jsonl_logger = get_jsonl_logger()
 
 
 async def sync_purchase_orders_to_stocktrim(
@@ -311,6 +313,15 @@ async def sync_purchase_orders_to_stocktrim(
 
     failed = sum(
         1 for r in results if r["status"] == "failed"
+    )
+
+    jsonl_logger.info(
+        build_jsonl_entry(
+            action_type=f"Sync purchase orders from SOS Inventory to StockTrim",
+            action_variant=f"sync-purchase-orders-from-sos-to-stocktrim",
+            status="Info",
+            message=f"Synced {success} purchase orders successfully, {failed} failed.",
+        )
     )
 
     return {

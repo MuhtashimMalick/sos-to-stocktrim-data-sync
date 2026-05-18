@@ -35,7 +35,7 @@ SOS_PASSWORD = settings.SOS_PASSWORD
 BASE_URL = settings.BASE_URL
 TOKEN_FILE = settings.TOKEN_FILE
 
-MAX_RESULTS = 5
+MAX_RESULTS = 200
 MAX_CONCURRENT_REQUESTS = 1
 
 jsonl_logger = get_jsonl_logger()
@@ -392,7 +392,7 @@ async def api_get(
                 items.extend(result.get("data", []) or [])
 
         item_map = {
-            "item": "products",
+            "item": "product",
             "vendor": "supplier",
             "customer": "customer",
             "location": "location",

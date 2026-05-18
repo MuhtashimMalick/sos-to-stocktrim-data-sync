@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
+from app.logging_config import get_jsonl_logger, build_jsonl_entry
 
 router = APIRouter(prefix="/customer", tags=["customer"])
 # --- SOS Nested Model
@@ -75,6 +76,7 @@ def map_sos_customer_to_stocktrim(data: SOSCustomerRequest) -> dict:
 STOCKTRIM_CONCURRENCY = 5
 
 logger = logging.getLogger(__name__)
+jsonl_logger = get_jsonl_logger()
 
 
 async def sync_customer_to_stocktrim(customers: dict[str, Any | list]):
@@ -121,6 +123,15 @@ async def sync_customer_to_stocktrim(customers: dict[str, Any | list]):
 
     success = sum(1 for r in results if r["status"] == "success")
     failed = sum(1 for r in results if r["status"] == "failed")
+
+    jsonl_logger.info(
+        build_jsonl_entry(
+            action_type=f"Sync customers from SOS Inventory to StockTrim",
+            action_variant=f"sync-customers-from-sos-to-stocktrim",
+            status="Info",
+            message=f"Synced {success} customers successfully, {failed} failed.",
+        )
+    )
 
     return {
         "success": success,

@@ -3,6 +3,7 @@ import httpx
 import json
 import logging
 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from typing import Dict, Any, Optional
 
 from pydantic import BaseModel
@@ -10,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.config import settings
 from app.sos_stocktrim_sync.utils import api_get
+from app.logging_config import get_jsonl_logger, build_jsonl_entry
 
 router = APIRouter(prefix="/stocktrim", tags=["stocktrim"])
 
@@ -19,7 +21,13 @@ class StockTrimClient:
         self.auth_id = auth_id
         self.auth_signature = auth_signature
         self.base_url = base_url
-        self.http = httpx.AsyncClient()
+        self.http = httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0),
+            limits=httpx.Limits(
+                max_keepalive_connections=5,
+                keepalive_expiry=30  # seconds — drop idle connections after 30s
+            )
+        )
 
     def _build_headers(self, method: str, endpoint: str, body: str = ""):
         return {
@@ -29,6 +37,12 @@ class StockTrimClient:
             "Content-Type": "application/json"
         }
 
+    @retry(
+        retry=retry_if_exception_type(
+            (httpx.RemoteProtocolError, httpx.ConnectError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=3)
+    )
     async def create_resource(self, method: str, endpoint: str, payload: Dict[str, Any] = None):
         url = f"{self.base_url}/{endpoint}"
         body_str = json.dumps(payload) if payload else ""
@@ -124,6 +138,7 @@ def map_sos_to_stocktrim(data: SOSItemRequest) -> dict:
 
 
 logger = logging.getLogger(__name__)
+jsonl_logger = get_jsonl_logger()
 STOCKTRIM_CONCURRENCY = 5
 
 
@@ -180,6 +195,15 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
 
     failed = sum(
         1 for r in results if r["status"] == "failed"
+    )
+
+    jsonl_logger.info(
+        build_jsonl_entry(
+            action_type=f"Sync items from SOS Inventory to StockTrim",
+            action_variant=f"sync-items-from-sos-to-stocktrim",
+            status="Info",
+            message=f"Synced {success} items successfully, {failed} failed.",
+        )
     )
 
     return {

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
+from app.logging_config import get_jsonl_logger, build_jsonl_entry
 
 router = APIRouter(prefix="/supplier", tags=["supplier"])
 
@@ -135,6 +136,7 @@ def map_sos_supplier_to_stocktrim(data: SOSSupplierRequest) -> dict:
 # Endpoints
 # ---------------------------------------------------------------------------
 logger = logging.getLogger(__name__)
+jsonl_logger = get_jsonl_logger()
 
 
 async def sync_supplier_to_stocktrim(vendors: dict[str, Any | list]):
@@ -178,6 +180,15 @@ async def sync_supplier_to_stocktrim(vendors: dict[str, Any | list]):
 
     success = sum(1 for r in results if r["status"] == "success")
     failed = sum(1 for r in results if r["status"] == "failed")
+
+    jsonl_logger.info(
+        build_jsonl_entry(
+            action_type=f"Sync suppliers from SOS Inventory to StockTrim",
+            action_variant=f"sync-suppliers-from-sos-to-stocktrim",
+            status="Info",
+            message=f"Synced {success} suppliers successfully, {failed} failed.",
+        )
+    )
 
     return {
         "success": success,

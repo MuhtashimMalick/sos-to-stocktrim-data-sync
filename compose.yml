@@ -90,6 +90,9 @@ services:
         condition: service_completed_successfully
     env_file:
       - .env
+    volumes:
+      - ./backend:/app/backend
+      - /app/backend/.venv
     environment:
       - DOMAIN=${DOMAIN}
       - FRONTEND_HOST=${FRONTEND_HOST?Variable not set}
