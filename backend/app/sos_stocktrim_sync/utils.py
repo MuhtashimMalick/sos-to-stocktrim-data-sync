@@ -22,6 +22,8 @@ from typing import Any, Dict
 from urllib.parse import urlparse, parse_qs
 
 from app.core.config import settings
+from app.logging_config import get_jsonl_logger, build_jsonl_entry
+
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
@@ -36,6 +38,7 @@ TOKEN_FILE = settings.TOKEN_FILE
 MAX_RESULTS = 5
 MAX_CONCURRENT_REQUESTS = 1
 
+jsonl_logger = get_jsonl_logger()
 
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -388,6 +391,23 @@ async def api_get(
                 # print(result)
                 items.extend(result.get("data", []) or [])
 
+        item_map = {
+            "item": "products",
+            "vendor": "supplier",
+            "customer": "customer",
+            "location": "location",
+            "salesorder": "sales order",
+            "purchaseorder": "purchase order",
+        }
+        item_type = item_map.get(endpoint.split("/")[-1])
+        jsonl_logger.info(
+            build_jsonl_entry(
+                action_type=f"Fetch {item_type}s from SOS Inventory",
+                action_variant=f"fetch-{item_type}s-from-sos-inventory",
+                status="Info",
+                message=f"Fetched {len(items)} {item_type}s from SOS Inventory",
+            )
+        )
         return {"data": items}
 
 

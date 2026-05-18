@@ -1,4 +1,3 @@
-from app.logging_config import get_jsonl_logger, build_jsonl_entry
 import asyncio
 import logging
 
@@ -116,9 +115,6 @@ async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
 # ---------------------------------------------------------------------------
 
 
-jsonl_logger = get_jsonl_logger()
-
-
 @router.post("/create-location")
 async def create_location():
     """
@@ -127,14 +123,6 @@ async def create_location():
 
     try:
         locations = await api_get("/api/v2/location")
-        jsonl_logger.info(
-            build_jsonl_entry(
-                action_type="Fetch locations from SOS Inventory",
-                action_variant="fetch-locations-from-sos-inventory",
-                status="Info",
-                message=f"Fetched {len(locations['data'])} locations from SOS Inventory",
-            )
-        )
 
         sync_result = await sync_location_to_stocktrim(locations)
 
