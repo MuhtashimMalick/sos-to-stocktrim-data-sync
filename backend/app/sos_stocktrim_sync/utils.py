@@ -9,14 +9,21 @@ Set your credentials in a .env file or as environment variables:
 Tokens are cached in sos_tokens.json and refreshed automatically.
 """
 
+
+import asyncio
+import httpx
 import json
 import os
+import requests
 import time
+
+from bs4 import BeautifulSoup
+from typing import Any, Dict
 from urllib.parse import urlparse, parse_qs
 
-import requests
-from bs4 import BeautifulSoup
 from app.core.config import settings
+from app.logging_config import get_jsonl_logger, build_jsonl_entry
+
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
@@ -28,6 +35,10 @@ SOS_PASSWORD = settings.SOS_PASSWORD
 BASE_URL = settings.BASE_URL
 TOKEN_FILE = settings.TOKEN_FILE
 
+MAX_RESULTS = 200
+MAX_CONCURRENT_REQUESTS = 1
+
+jsonl_logger = get_jsonl_logger()
 
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -276,16 +287,128 @@ def get_access_token() -> str:
     return tokens["access_token"]
 
 
-def api_get(endpoint: str, params: dict = None) -> dict:
-    """Authenticated GET against the SOS v2 API. e.g. api_get('/api/v2/item')"""
-    token = get_access_token()
-    resp = requests.get(
+# def api_get(endpoint: str, params: dict = None) -> dict:
+#     """Authenticated GET against the SOS v2 API. e.g. api_get('/api/v2/item')"""
+#     token = get_access_token()
+
+#     resp = requests.get(
+#         f"{BASE_URL}{endpoint}",
+#         headers={"Authorization": f"Bearer {token}"},
+#         params=params,
+#     )
+#     resp.raise_for_status()
+#     return resp.json()
+
+
+async def fetch_page(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    token: str,
+    params: Dict[str, Any],
+    start: int,
+    maxresults: int,
+):
+    response = await client.get(
         f"{BASE_URL}{endpoint}",
         headers={"Authorization": f"Bearer {token}"},
-        params=params,
+        params={
+            **params,
+            "start": start,
+            "maxresults": maxresults,
+        },
     )
-    resp.raise_for_status()
-    return resp.json()
+
+    print(response.url)
+    print(response.status_code)
+
+    # Helpful for debugging throttling
+    if response.status_code != 200:
+        print(response.text)
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+async def api_get(
+    endpoint: str,
+    params: Dict[str, Any] | None = None,
+):
+    """
+    Fetch all paginated data from SOS API
+    with limited concurrency to avoid throttling.
+    """
+
+    if params is None:
+        params = {}
+
+    token = get_access_token()
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+
+        # First request
+        first_page = await fetch_page(
+            client=client,
+            endpoint=endpoint,
+            token=token,
+            params=params,
+            start=0,
+            maxresults=MAX_RESULTS,
+        )
+
+        items = first_page.get("data", []) or []
+        total_count = first_page.get("totalCount", 0)
+
+        # Remaining offsets
+        starts = range(MAX_RESULTS, total_count, MAX_RESULTS)
+
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+
+        async def limited_fetch(start: int):
+            async with semaphore:
+
+                # Tiny delay helps avoid SOS throttling
+                # await asyncio.sleep(0.6)
+
+                return await fetch_page(
+                    client=client,
+                    endpoint=endpoint,
+                    token=token,
+                    params=params,
+                    start=start,
+                    maxresults=MAX_RESULTS,
+                )
+
+        tasks = [
+            limited_fetch(start)
+            for start in starts
+        ]
+
+        if tasks:
+            results = await asyncio.gather(*tasks)
+
+            for result in results:
+                # print(result)
+                items.extend(result.get("data", []) or [])
+
+        item_map = {
+            "item": "product",
+            "vendor": "supplier",
+            "customer": "customer",
+            "location": "location",
+            "salesorder": "sales order",
+            "purchaseorder": "purchase order",
+        }
+        item_type = item_map.get(endpoint.split("/")[-1])
+        jsonl_logger.info(
+            build_jsonl_entry(
+                action_type=f"Fetch {item_type}s from SOS Inventory",
+                action_variant=f"fetch-{item_type}s-from-sos-inventory",
+                status="Info",
+                message=f"Fetched {len(items)} {item_type}s from SOS Inventory",
+            )
+        )
+        return {"data": items}
 
 
 def api_post(endpoint: str, payload: dict = None) -> dict:

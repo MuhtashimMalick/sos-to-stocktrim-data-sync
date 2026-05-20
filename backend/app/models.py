@@ -1,8 +1,10 @@
 import uuid
+
 from datetime import datetime, timezone
+from typing import Optional
 
 from pydantic import EmailStr
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime, Column, Integer, ForeignKey
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -31,7 +33,8 @@ class UserRegister(SQLModel):
 
 # Properties to receive via API on update, all are optional
 class UserUpdate(UserBase):
-    email: EmailStr | None = Field(default=None, max_length=255)  # type: ignore[assignment]
+    email: EmailStr | None = Field(
+        default=None, max_length=255)  # type: ignore[assignment]
     password: str | None = Field(default=None, min_length=8, max_length=128)
 
 
@@ -53,8 +56,54 @@ class User(UserBase, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
-    items: list["Item"] = Relationship(back_populates="owner", cascade_delete=True)
+    items: list["Item"] = Relationship(
+        back_populates="owner", cascade_delete=True)
+    preference: Optional["UserPreference"] = Relationship(
+        back_populates="user"
+    )
 
+
+class UserPreference(SQLModel, table=True):
+    __tablename__ = "user_preferences"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    # Run APScheduler sync every X minutes
+    sync_after_mins: int = Field(
+        default=60,
+        nullable=False,
+    )
+    # Enable/disable automatic sync
+    enable_auto_sync: bool = Field(
+        default=True,
+        nullable=False,
+    )
+
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id",
+        unique=True,
+        nullable=False,
+    )
+    user: Optional[User] = Relationship(
+        back_populates="preference"
+    )
+
+class UserPreferenceBase(SQLModel):
+    sync_after_mins: int = Field(default=60, ge=1)
+    enable_auto_sync: bool = Field(default=True)
+
+
+class UserPreferenceCreate(UserPreferenceBase):
+    pass
+
+
+class UserPreferenceUpdate(SQLModel):
+    sync_after_mins: Optional[int] = Field(default=None, ge=1)
+    enable_auto_sync: Optional[bool] = None
+
+
+class UserPreferenceRead(UserPreferenceBase):
+    id: uuid.UUID
+    user_id: uuid.UUID
 
 # Properties to return via API, id is always required
 class UserPublic(UserBase):
@@ -80,7 +129,8 @@ class ItemCreate(ItemBase):
 
 # Properties to receive on item update
 class ItemUpdate(ItemBase):
-    title: str | None = Field(default=None, min_length=1, max_length=255)  # type: ignore[assignment]
+    # type: ignore[assignment]
+    title: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 # Database model, database table inferred from class name
