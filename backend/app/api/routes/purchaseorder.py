@@ -159,7 +159,7 @@ def map_sos_po_to_stocktrim(data: SOSPurchaseOrderRequest) -> dict:
     line_items = []
     for line in data.lines or []:
         st_line = {
-            "productId": line.item.name if line.item else None,   # SKU stored in item.name
+            "productId": line.item.id if line.item else None,   # SKU stored in item.name
             "quantity": float(line.quantity or 0),
             "unitPrice": float(line.unitprice or 0),
         }
