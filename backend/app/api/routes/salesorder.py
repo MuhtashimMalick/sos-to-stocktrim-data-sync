@@ -137,7 +137,7 @@ async def sync_sales_orders_to_stocktrim(
 
                 except Exception as e:
                     logger.error(
-                        "Failed to sync sales order payload to StockTrim",
+                        f"Failed to sync sales order payload to StockTrim {str(e)}",
                         extra={
                             "error": str(e),
                             "payload": payload,
