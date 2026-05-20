@@ -251,7 +251,7 @@ def map_stocktrim_po_to_sos(data: STCreatePORequest) -> dict:
 # ---------------------------------------------------------------------------
 
 
-STOCKTRIM_CONCURRENCY = 5
+STOCKTRIM_CONCURRENCY = 1
 logger = logging.getLogger(__name__)
 jsonl_logger = get_jsonl_logger()
 
@@ -284,6 +284,7 @@ async def sync_purchase_orders_to_stocktrim(
             }
 
         except Exception as e:
+            print(f"Failed to sync purchase order to StockTrim: {str(e)}")
             logger.error(
                 f"Failed to sync purchase order to StockTrim {str(e)}",
                 extra={

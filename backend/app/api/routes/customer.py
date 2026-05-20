@@ -102,7 +102,7 @@ async def sync_customer_to_stocktrim(customers: dict[str, Any | list]):
 
         except Exception as e:
             logger.error(
-                "Failed to sync customer to StockTrim",
+                f"Failed to sync customer to StockTrim: {str(e)}",
                 extra={
                     "error": str(e),
                     "payload": payload,

@@ -38,8 +38,7 @@ class StockTrimClient:
         }
 
     @retry(
-        retry=retry_if_exception_type(
-            (httpx.RemoteProtocolError, httpx.ConnectError)),
+        retry=retry_if_exception_type(Exception),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=0.5, min=0.5, max=3)
     )
@@ -167,7 +166,7 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
 
         except Exception as e:
             logger.error(
-                "Failed to sync item to StockTrim",
+                f"Failed to sync item to StockTrim: {str(e)}",
                 extra={
                     "error": str(e),
                     "payload": item,
