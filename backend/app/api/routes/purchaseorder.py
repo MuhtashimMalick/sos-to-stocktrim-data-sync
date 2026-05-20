@@ -173,8 +173,10 @@ def map_sos_po_to_stocktrim(data: SOSPurchaseOrderRequest) -> dict:
 
     payload = {
         "orderDate": data.date,
-        "referenceNumber": data.number,
-        "externalId": str(data.id),
+        "createdDate":data.date,
+        "fullyReceivedDate":data.date,
+        "referenceNumber": str(data.number),
+        "externalId": data.id,
         "status": status,
         "purchaseOrderLineItems": line_items,
     }
@@ -194,8 +196,9 @@ def map_sos_po_to_stocktrim(data: SOSPurchaseOrderRequest) -> dict:
         }
 
     # Tracking number stored as clientReferenceNumber (closest StockTrim field)
-    if data.trackingNumber:
-        payload["clientReferenceNumber"] = data.trackingNumber
+    # if data.trackingNumber:
+    payload["clientReferenceNumber"] = data.number
+    # else:
 
     return payload
 
