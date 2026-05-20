@@ -83,7 +83,7 @@ async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
 
         except Exception as e:
             logger.error(
-                "Failed to sync location to StockTrim",
+                f"Failed to sync location to StockTrim: {str(e)}",
                 extra={
                     "error": str(e),
                     "payload": payload,

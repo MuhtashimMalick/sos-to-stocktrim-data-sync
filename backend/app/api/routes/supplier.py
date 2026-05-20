@@ -159,7 +159,7 @@ async def sync_supplier_to_stocktrim(vendors: dict[str, Any | list]):
         except Exception as e:
             # 🔥 IMPORTANT: log full context
             logger.error(
-                "Failed to sync supplier to StockTrim",
+                f"Failed to sync supplier to StockTrim: {str(e)}",
                 extra={
                     "error": str(e),
                     "payload": payload,
