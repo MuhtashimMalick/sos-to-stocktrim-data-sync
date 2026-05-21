@@ -166,7 +166,7 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
 
         except Exception as e:
             logger.error(
-                f"Failed to sync item to StockTrim: {str(e)}",
+                f"Failed to sync product to StockTrim: {str(e)}",
                 extra={
                     "error": str(e),
                     "payload": item,
@@ -198,10 +198,10 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
 
     jsonl_logger.info(
         build_jsonl_entry(
-            action_type=f"Sync items from SOS Inventory to StockTrim",
-            action_variant=f"sync-items-from-sos-to-stocktrim",
+            action_type=f"Sync products from SOS Inventory to StockTrim",
+            action_variant=f"sync-products-from-sos-to-stocktrim",
             status="Info",
-            message=f"Synced {success} items successfully, {failed} failed.",
+            message=f"Synced {success} products successfully, {failed} failed.",
         )
     )
 

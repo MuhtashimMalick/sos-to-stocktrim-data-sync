@@ -340,7 +340,7 @@ async def api_get(
     """
 
     if params is None:
-        params = {}
+        params = {"archived": "both"}  # default to non-archived items, adjust as needed
 
     token = get_access_token()
 

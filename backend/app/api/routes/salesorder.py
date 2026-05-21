@@ -186,13 +186,14 @@ async def sync_sales_orders_to_stocktrim(
 
         if order["status"] == "failed":
             failed += 1
-            continue
+        else:
+            success += 1
 
-        for r in order["results"]:
-            if r["status"] == "success":
-                success += 1
-            else:
-                failed += 1
+        # for r in order["results"]:
+        #     if r["status"] == "success":
+        #         success += 1
+        #     else:
+        #         failed += 1
 
     jsonl_logger.info(
         build_jsonl_entry(
