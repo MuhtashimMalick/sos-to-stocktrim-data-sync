@@ -4,7 +4,7 @@ import logging
 from typing import Any, Optional, List
 
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
@@ -214,10 +214,21 @@ async def sync_sales_orders_to_stocktrim(
 
 
 @router.post("/create-sales-order")
-async def create_sales_order():
+async def create_sales_order(
+    archived: bool = Query(False),
+    from_date: Optional[str] = Query(
+        None, description="Filter sales orders from this date (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(
+        None, description="Filter sales orders to this date (YYYY-MM-DD)"),
+):
 
     try:
-        sales_orders = await api_get("/api/v2/salesorder")
+        params = {
+            "archived": "yes" if archived else "no",
+            "from": f"{from_date}T00:00:00" if from_date else None,
+            "to": f"{to_date}T23:59:59" if to_date else None
+        }
+        sales_orders = await api_get("/api/v2/salesorder", params=params)
 
         result = await sync_sales_orders_to_stocktrim(
             sales_orders

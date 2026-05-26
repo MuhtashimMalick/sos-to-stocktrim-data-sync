@@ -84,6 +84,9 @@ const INDIVIDUAL_SYNCS: {
 
 const COLLAPSED_COUNT = 5;
 
+// Only these two endpoints support archived=true with from/to date params
+const ARCHIVED_KEYS: SyncKey[] = ["purchase_orders", "sales_orders"];
+
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const GearIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -144,6 +147,18 @@ const XIcon = () => (
 const ToastCheckIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#3B82F6" strokeWidth={2.5}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+  </svg>
+);
+
+const ArchiveIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z" />
+  </svg>
+);
+
+const CalendarIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
   </svg>
 );
 
@@ -301,12 +316,179 @@ const Toast = ({ message, onClose }: { message: string; onClose: () => void }) =
   </div>
 );
 
+// ─── Archived Filter Bar ───────────────────────────────────────────────────────
+interface ArchivedFilterProps {
+  archived: boolean;
+  onArchivedChange: (val: boolean) => void;
+  fromDate: string;
+  toDate: string;
+  onFromDateChange: (val: string) => void;
+  onToDateChange: (val: string) => void;
+  dateError: string | null;
+}
+
+const ArchivedFilter = ({
+  archived,
+  onArchivedChange,
+  fromDate,
+  toDate,
+  onFromDateChange,
+  onToDateChange,
+  dateError,
+}: ArchivedFilterProps) => {
+  const today = new Date().toISOString().split("T")[0];
+
+  return (
+    <div
+      style={{
+        maxWidth: 640,
+        margin: "0 auto 20px",
+        background: archived ? "#eff6ff" : "#f8fafc",
+        border: `1.5px solid ${archived ? "#bfdbfe" : "#e2e8f0"}`,
+        borderRadius: 10,
+        padding: "14px 18px",
+        transition: "all 0.2s ease",
+      }}
+    >
+      {/* Checkbox row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => onArchivedChange(!archived)}>
+        {/* Custom checkbox */}
+        <div
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: 5,
+            border: `2px solid ${archived ? "#3B82F6" : "#cbd5e1"}`,
+            background: archived ? "#3B82F6" : "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            transition: "all 0.15s",
+          }}
+        >
+          {archived && (
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+              <path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </div>
+        <span style={{ color: archived ? "#1d4ed8" : "#64748B", fontWeight: 600, fontSize: 14, userSelect: "none", display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ color: archived ? "#3B82F6" : "#94a3b8" }}><ArchiveIcon /></span>
+          Sync Archived Data
+          <span style={{ fontSize: 11, fontWeight: 500, color: archived ? "#60a5fa" : "#94a3b8" }}>
+            — Sales &amp; Purchase Orders only
+          </span>
+        </span>
+        {/* {archived && (
+          <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 500, color: "#3B82F6", background: "#dbeafe", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+            archived=true
+          </span>
+        )} */}
+      </div>
+
+      {/* Date range — only shown when archived is checked */}
+      {archived && (
+        <div style={{ marginTop: 14, animation: "slideUp 0.18s ease" }}>
+          <div style={{ height: 1, background: "#bfdbfe", marginBottom: 14, opacity: 0.5 }} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {/* From */}
+            <div>
+              <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: "#2563eb", marginBottom: 6 }}>
+                <CalendarIcon /> From Date
+              </label>
+              <input
+                type="date"
+                value={fromDate}
+                max={toDate || today}
+                onChange={(e) => onFromDateChange(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  border: `1.5px solid ${dateError ? "#fca5a5" : "#93c5fd"}`,
+                  borderRadius: 7,
+                  fontSize: 13,
+                  color: "#1E293B",
+                  background: "#fff",
+                  fontFamily: "Inter, sans-serif",
+                  outline: "none",
+                  cursor: "pointer",
+                  transition: "border-color 0.15s",
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = "#3B82F6")}
+                onBlur={(e) => (e.currentTarget.style.borderColor = dateError ? "#fca5a5" : "#93c5fd")}
+                onClick={(e) => { try { (e.currentTarget as any).showPicker(); } catch { /* unsupported */ } }}
+              />
+            </div>
+
+            {/* To */}
+            <div>
+              <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, color: "#2563eb", marginBottom: 6 }}>
+                <CalendarIcon /> To Date
+              </label>
+              <input
+                type="date"
+                value={toDate}
+                min={fromDate || undefined}
+                max={today}
+                onChange={(e) => onToDateChange(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  border: `1.5px solid ${dateError ? "#fca5a5" : "#93c5fd"}`,
+                  borderRadius: 7,
+                  fontSize: 13,
+                  color: "#1E293B",
+                  background: "#fff",
+                  fontFamily: "Inter, sans-serif",
+                  outline: "none",
+                  cursor: "pointer",
+                  transition: "border-color 0.15s",
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = "#3B82F6")}
+                onBlur={(e) => (e.currentTarget.style.borderColor = dateError ? "#fca5a5" : "#93c5fd")}
+                onClick={(e) => { try { (e.currentTarget as any).showPicker(); } catch { /* unsupported */ } }}
+              />
+            </div>
+          </div>
+
+          {/* Validation error */}
+          {dateError && (
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: "#dc2626", display: "flex", alignItems: "center", gap: 4 }}>
+              <ErrorCircleIcon />
+              {dateError}
+            </p>
+          )}
+
+          {/* Helper text when both dates are set */}
+          {!dateError && fromDate && toDate && (
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: "#2563eb", fontWeight: 500 }}>
+              Syncing archived data from <strong>{fromDate}</strong> to <strong>{toDate}</strong>
+            </p>
+          )}
+          {!dateError && (!fromDate || !toDate) && (
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748B" }}>
+              Both dates are required to sync archived data.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [syncingKey, setSyncingKey] = useState<SyncKey | null>(null);
+
+  // ── Archived filter state ──
+  const [archived, setArchived] = useState(false);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [dateError, setDateError] = useState<string | null>(null);
 
   // ── Log state ──
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -315,6 +497,38 @@ export default function App() {
 
   const visibleLogs = showAll ? logs : logs.slice(0, COLLAPSED_COUNT);
   const isBusy = syncingKey !== null;
+
+  // ── Validate dates whenever they change ──
+  useEffect(() => {
+    if (!archived) { setDateError(null); return; }
+    if (fromDate && toDate && new Date(fromDate) > new Date(toDate)) {
+      setDateError("\"From\" date must be before or equal to \"To\" date.");
+    } else {
+      setDateError(null);
+    }
+  }, [fromDate, toDate, archived]);
+
+  // ── Validate before running an archived sync (only for supported keys) ──
+  const archivedReady = (key: SyncKey): boolean => {
+    if (!archived || !ARCHIVED_KEYS.includes(key)) return true;
+    if (!fromDate || !toDate) {
+      setToast("Please select both From and To dates for archived sync.");
+      return false;
+    }
+    if (dateError) {
+      setToast(dateError);
+      return false;
+    }
+    return true;
+  };
+
+  // ── Build query string for archived requests ──
+  const buildArchivedParams = (): string => {
+    const params = new URLSearchParams({ archived: "true" });
+    if (fromDate) params.set("from_date", fromDate);
+    if (toDate) params.set("to_date", toDate);
+    return params.toString();
+  };
 
   // ── Fetch today's logs ──
   const fetchLogs = async () => {
@@ -332,21 +546,17 @@ export default function App() {
     }
   };
 
-  // Fetch on mount
   useEffect(() => { fetchLogs(); }, []);
 
-  // Re-fetch after every sync finishes
   useEffect(() => {
     if (syncingKey === null) fetchLogs();
   }, [syncingKey]);
 
-  // Auto-poll every 5 seconds
   useEffect(() => {
     const interval = setInterval(fetchLogs, 10_000);
     return () => clearInterval(interval);
   }, []);
 
-  // Auto-dismiss toast after 10s
   useEffect(() => {
     if (toast) {
       const t = setTimeout(() => setToast(null), 10000);
@@ -363,10 +573,16 @@ export default function App() {
     successMsg: string,
   ) => {
     if (isBusy) return;
+    if (!archivedReady(key)) return;
+
+    // Only append archived params for supported order endpoints
+    const isArchivedSync = archived && ARCHIVED_KEYS.includes(key);
+    const url = isArchivedSync ? `${endpoint}?${buildArchivedParams()}` : endpoint;
+
     setSyncingKey(key);
     setToast(startMsg);
     try {
-      const response = await fetch(endpoint, { method });
+      const response = await fetch(url, { method });
       if (!response.ok) {
         let errorMessage = `Sync failed (HTTP ${response.status})`;
         try {
@@ -403,6 +619,8 @@ export default function App() {
         @keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes spin    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; }
+        input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
       `}</style>
 
       {/* Navbar */}
@@ -419,35 +637,127 @@ export default function App() {
         {/* ── Buttons ── */}
         <div style={{ textAlign: "center", marginBottom: 48 }}>
 
-          {/* Primary: Full sync */}
+          {/* Primary: Full sync — disabled in archived mode (archived only applies to specific order endpoints) */}
           <button
             onClick={handleSync}
-            disabled={isBusy}
-            style={{ display: "inline-flex", alignItems: "center", gap: 10, background: syncingKey === "all" ? "#2563eb" : "#3B82F6", color: "#fff", padding: "15px 36px", borderRadius: 10, border: "none", fontSize: 16, fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer", fontFamily: "Inter, sans-serif", letterSpacing: "-0.01em", boxShadow: "0 4px 16px rgba(59,130,246,0.30)", transition: "background 0.15s, transform 0.1s, box-shadow 0.15s", opacity: isBusy && syncingKey !== "all" ? 0.5 : 1 }}
-            onMouseEnter={(e) => { if (!isBusy) { e.currentTarget.style.background = "#2563eb"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(59,130,246,0.38)"; } }}
-            onMouseLeave={(e) => { if (!isBusy) { e.currentTarget.style.background = "#3B82F6"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(59,130,246,0.30)"; } }}
-            onMouseDown={(e) => { if (!isBusy) e.currentTarget.style.transform = "scale(0.98)"; }}
+            disabled={isBusy || archived}
+            title={archived ? "Disabled in archived mode — use the Sales/Purchase Order buttons below" : undefined}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 10,
+              background: syncingKey === "all" ? "#2563eb" : "#3B82F6",
+              color: "#fff",
+              padding: "15px 36px",
+              borderRadius: 10,
+              border: "none",
+              fontSize: 16,
+              fontWeight: 600,
+              cursor: isBusy || archived ? "not-allowed" : "pointer",
+              fontFamily: "Inter, sans-serif",
+              letterSpacing: "-0.01em",
+              boxShadow: "0 4px 16px rgba(59,130,246,0.30)",
+              transition: "background 0.15s, transform 0.1s, box-shadow 0.15s",
+              opacity: isBusy || archived ? 0.45 : 1,
+            }}
+            onMouseEnter={(e) => { if (!isBusy && !archived) { e.currentTarget.style.background = "#2563eb"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(59,130,246,0.38)"; } }}
+            onMouseLeave={(e) => { if (!isBusy && !archived) { e.currentTarget.style.background = "#3B82F6"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(59,130,246,0.30)"; } }}
+            onMouseDown={(e) => { if (!isBusy && !archived) e.currentTarget.style.transform = "scale(0.98)"; }}
             onMouseUp={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
           >
             {syncingKey === "all" ? <Spinner size={20} color="#fff" /> : <SyncIcon />}
             {syncingKey === "all" ? "Syncing..." : "SOS → StockTrim Sync"}
           </button>
 
+          {/* ── Archived filter bar ── */}
+          <div style={{ marginTop: 20 }}>
+            <ArchivedFilter
+              archived={archived}
+              onArchivedChange={(val) => {
+                setArchived(val);
+                if (!val) { setFromDate(""); setToDate(""); setDateError(null); }
+              }}
+              fromDate={fromDate}
+              toDate={toDate}
+              onFromDateChange={setFromDate}
+              onToDateChange={setToDate}
+              dateError={dateError}
+            />
+          </div>
+
           {/* Secondary: Individual sync buttons */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, maxWidth: 640, margin: "16px auto 0" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, maxWidth: 640, margin: "0 auto 0" }}>
             {INDIVIDUAL_SYNCS.map(({ key, label, endpoint, method, startMsg, successMsg }) => {
               const isThisLoading = syncingKey === key;
+              const supportsArchived = ARCHIVED_KEYS.includes(key);
+              // In archived mode: non-order buttons are fully disabled; order buttons are active with archived styling
+              const isDisabledByArchived = archived && !supportsArchived;
+              const isDisabled = isBusy || isDisabledByArchived;
+              const showArchivedStyle = archived && supportsArchived;
+
               return (
                 <button
                   key={key}
                   onClick={() => runSync(key, endpoint, method, startMsg, successMsg)}
-                  disabled={isBusy}
-                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, background: isThisLoading ? "#f0f9ff" : "#fff", color: isThisLoading ? "#2563eb" : "#374151", border: `1.5px solid ${isThisLoading ? "#93c5fd" : "#e2e8f0"}`, padding: "11px 14px", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer", fontFamily: "Inter, sans-serif", letterSpacing: "-0.01em", transition: "all 0.15s", opacity: isBusy && !isThisLoading ? 0.45 : 1, boxShadow: isThisLoading ? "0 0 0 3px rgba(59,130,246,0.12)" : "none", whiteSpace: "nowrap" }}
-                  onMouseEnter={(e) => { if (!isBusy) { e.currentTarget.style.borderColor = "#93c5fd"; e.currentTarget.style.background = "#f0f9ff"; e.currentTarget.style.color = "#2563eb"; } }}
-                  onMouseLeave={(e) => { if (!isBusy && !isThisLoading) { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "#374151"; } }}
+                  disabled={isDisabled}
+                  title={isDisabledByArchived ? "Not available in archived mode" : undefined}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 7,
+                    background: isThisLoading
+                      ? "#f0f9ff"
+                      : showArchivedStyle
+                      ? "#eff6ff"
+                      : "#fff",
+                    color: isThisLoading || showArchivedStyle ? "#2563eb" : "#374151",
+                    border: `1.5px solid ${
+                      isThisLoading
+                        ? "#93c5fd"
+                        : showArchivedStyle
+                        ? "#bfdbfe"
+                        : "#e2e8f0"
+                    }`,
+                    padding: "11px 14px",
+                    borderRadius: 9,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: isDisabled ? "not-allowed" : "pointer",
+                    fontFamily: "Inter, sans-serif",
+                    letterSpacing: "-0.01em",
+                    transition: "all 0.15s",
+                    opacity: isDisabledByArchived ? 0.35 : isBusy && !isThisLoading ? 0.45 : 1,
+                    boxShadow: isThisLoading ? "0 0 0 3px rgba(59,130,246,0.12)" : "none",
+                    whiteSpace: "nowrap",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isDisabled) {
+                      e.currentTarget.style.borderColor = "#93c5fd";
+                      e.currentTarget.style.background = "#f0f9ff";
+                      e.currentTarget.style.color = "#2563eb";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isDisabled && !isThisLoading) {
+                      e.currentTarget.style.borderColor = showArchivedStyle ? "#bfdbfe" : "#e2e8f0";
+                      e.currentTarget.style.background = showArchivedStyle ? "#eff6ff" : "#fff";
+                      e.currentTarget.style.color = showArchivedStyle ? "#2563eb" : "#374151";
+                    }
+                  }}
                 >
-                  {isThisLoading ? <Spinner size={14} color="#2563eb" /> : <SyncIcon />}
-                  {isThisLoading ? "Syncing..." : label}
+                  {isThisLoading ? (
+                    <Spinner size={14} color="#2563eb" />
+                  ) : showArchivedStyle ? (
+                    <ArchiveIcon />
+                  ) : (
+                    <SyncIcon />
+                  )}
+                  {isThisLoading
+                    ? "Syncing..."
+                    : showArchivedStyle
+                    ? `${label} (Archived)`
+                    : label}
                 </button>
               );
             })}

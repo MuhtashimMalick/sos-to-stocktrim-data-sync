@@ -4,7 +4,7 @@ import logging
 from typing import Any, Optional, List
 
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
@@ -172,8 +172,8 @@ def map_sos_po_to_stocktrim(data: SOSPurchaseOrderRequest) -> dict:
 
     payload = {
         "orderDate": data.date,
-        "createdDate":data.date,
-        "fullyReceivedDate":data.date,
+        "createdDate": data.date,
+        "fullyReceivedDate": data.date,
         "referenceNumber": str(data.number),
         "externalId": data.id,
         "status": status,
@@ -334,13 +334,24 @@ async def sync_purchase_orders_to_stocktrim(
 
 
 @router.post("/sync-from-sos")
-async def sync_purchase_order_from_sos():
+async def sync_purchase_order_from_sos(
+    archived: bool = Query(False),
+    from_date: Optional[str] = Query(
+        None, description="Filter purchase orders from this date (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(
+        None, description="Filter purchase orders to this date (YYYY-MM-DD)"),
+):
     """
     Sync SOS purchase orders into StockTrim concurrently.
     """
 
     try:
-        purchase_orders = await api_get("/api/v2/purchaseorder")
+        params = {
+            "archived": "yes" if archived else "no",
+            "from": f"{from_date}T00:00:00" if from_date else None,
+            "to": f"{to_date}T23:59:59" if to_date else None
+        }
+        purchase_orders = await api_get("/api/v2/purchaseorder", params=params)
 
         sync_result = await sync_purchase_orders_to_stocktrim(
             purchase_orders
