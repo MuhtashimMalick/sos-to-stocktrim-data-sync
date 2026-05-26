@@ -84,6 +84,9 @@ const INDIVIDUAL_SYNCS: {
 
 const COLLAPSED_COUNT = 5;
 
+// Only these two endpoints support archived=true with from/to date params
+const ARCHIVED_KEYS: SyncKey[] = ["purchase_orders", "sales_orders"];
+
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const GearIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -373,12 +376,15 @@ const ArchivedFilter = ({
         <span style={{ color: archived ? "#1d4ed8" : "#64748B", fontWeight: 600, fontSize: 14, userSelect: "none", display: "flex", alignItems: "center", gap: 7 }}>
           <span style={{ color: archived ? "#3B82F6" : "#94a3b8" }}><ArchiveIcon /></span>
           Sync Archived Data
+          <span style={{ fontSize: 11, fontWeight: 500, color: archived ? "#60a5fa" : "#94a3b8" }}>
+            — Sales &amp; Purchase Orders only
+          </span>
         </span>
-        {archived && (
+        {/* {archived && (
           <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 500, color: "#3B82F6", background: "#dbeafe", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
             archived=true
           </span>
-        )}
+        )} */}
       </div>
 
       {/* Date range — only shown when archived is checked */}
@@ -411,6 +417,7 @@ const ArchivedFilter = ({
                 }}
                 onFocus={(e) => (e.currentTarget.style.borderColor = "#3B82F6")}
                 onBlur={(e) => (e.currentTarget.style.borderColor = dateError ? "#fca5a5" : "#93c5fd")}
+                onClick={(e) => { try { (e.currentTarget as any).showPicker(); } catch { /* unsupported */ } }}
               />
             </div>
 
@@ -440,6 +447,7 @@ const ArchivedFilter = ({
                 }}
                 onFocus={(e) => (e.currentTarget.style.borderColor = "#3B82F6")}
                 onBlur={(e) => (e.currentTarget.style.borderColor = dateError ? "#fca5a5" : "#93c5fd")}
+                onClick={(e) => { try { (e.currentTarget as any).showPicker(); } catch { /* unsupported */ } }}
               />
             </div>
           </div>
@@ -500,17 +508,9 @@ export default function App() {
     }
   }, [fromDate, toDate, archived]);
 
-  // ── Build query string for archived requests ──
-  const buildArchivedParams = (): string => {
-    const params = new URLSearchParams({ archived: "true" });
-    if (fromDate) params.set("from", fromDate);
-    if (toDate) params.set("to", toDate);
-    return params.toString();
-  };
-
-  // ── Validate before running an archived sync ──
-  const archivedReady = (): boolean => {
-    if (!archived) return true;
+  // ── Validate before running an archived sync (only for supported keys) ──
+  const archivedReady = (key: SyncKey): boolean => {
+    if (!archived || !ARCHIVED_KEYS.includes(key)) return true;
     if (!fromDate || !toDate) {
       setToast("Please select both From and To dates for archived sync.");
       return false;
@@ -520,6 +520,14 @@ export default function App() {
       return false;
     }
     return true;
+  };
+
+  // ── Build query string for archived requests ──
+  const buildArchivedParams = (): string => {
+    const params = new URLSearchParams({ archived: "true" });
+    if (fromDate) params.set("from_date", fromDate);
+    if (toDate) params.set("to_date", toDate);
+    return params.toString();
   };
 
   // ── Fetch today's logs ──
@@ -565,10 +573,11 @@ export default function App() {
     successMsg: string,
   ) => {
     if (isBusy) return;
-    if (!archivedReady()) return;
+    if (!archivedReady(key)) return;
 
-    // Append query params if archived mode is active
-    const url = archived ? `${endpoint}?${buildArchivedParams()}` : endpoint;
+    // Only append archived params for supported order endpoints
+    const isArchivedSync = archived && ARCHIVED_KEYS.includes(key);
+    const url = isArchivedSync ? `${endpoint}?${buildArchivedParams()}` : endpoint;
 
     setSyncingKey(key);
     setToast(startMsg);
@@ -597,8 +606,8 @@ export default function App() {
       "all",
       "http://localhost:8000/api/v1/sos-stocktrim/sync-all-data-to-stocktrim/",
       "POST",
-      archived ? "Syncing all archived data to StockTrim..." : "Syncing all data to StockTrim...",
-      archived ? "All archived data synced to StockTrim successfully." : "All data synced to StockTrim successfully.",
+      "Syncing all data to StockTrim...",
+      "All data synced to StockTrim successfully.",
     );
 
   return (
@@ -628,41 +637,36 @@ export default function App() {
         {/* ── Buttons ── */}
         <div style={{ textAlign: "center", marginBottom: 48 }}>
 
-          {/* Primary: Full sync */}
+          {/* Primary: Full sync — disabled in archived mode (archived only applies to specific order endpoints) */}
           <button
             onClick={handleSync}
-            disabled={isBusy}
+            disabled={isBusy || archived}
+            title={archived ? "Disabled in archived mode — use the Sales/Purchase Order buttons below" : undefined}
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: 10,
-              background: syncingKey === "all" ? "#2563eb" : archived ? "#1d4ed8" : "#3B82F6",
+              background: syncingKey === "all" ? "#2563eb" : "#3B82F6",
               color: "#fff",
               padding: "15px 36px",
               borderRadius: 10,
               border: "none",
               fontSize: 16,
               fontWeight: 600,
-              cursor: isBusy ? "not-allowed" : "pointer",
+              cursor: isBusy || archived ? "not-allowed" : "pointer",
               fontFamily: "Inter, sans-serif",
               letterSpacing: "-0.01em",
-              boxShadow: archived
-                ? "0 4px 16px rgba(29,78,216,0.35)"
-                : "0 4px 16px rgba(59,130,246,0.30)",
+              boxShadow: "0 4px 16px rgba(59,130,246,0.30)",
               transition: "background 0.15s, transform 0.1s, box-shadow 0.15s",
-              opacity: isBusy && syncingKey !== "all" ? 0.5 : 1,
+              opacity: isBusy || archived ? 0.45 : 1,
             }}
-            onMouseEnter={(e) => { if (!isBusy) { e.currentTarget.style.background = "#2563eb"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(59,130,246,0.38)"; } }}
-            onMouseLeave={(e) => { if (!isBusy) { e.currentTarget.style.background = archived ? "#1d4ed8" : "#3B82F6"; e.currentTarget.style.boxShadow = archived ? "0 4px 16px rgba(29,78,216,0.35)" : "0 4px 16px rgba(59,130,246,0.30)"; } }}
-            onMouseDown={(e) => { if (!isBusy) e.currentTarget.style.transform = "scale(0.98)"; }}
+            onMouseEnter={(e) => { if (!isBusy && !archived) { e.currentTarget.style.background = "#2563eb"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(59,130,246,0.38)"; } }}
+            onMouseLeave={(e) => { if (!isBusy && !archived) { e.currentTarget.style.background = "#3B82F6"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(59,130,246,0.30)"; } }}
+            onMouseDown={(e) => { if (!isBusy && !archived) e.currentTarget.style.transform = "scale(0.98)"; }}
             onMouseUp={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
           >
-            {syncingKey === "all" ? <Spinner size={20} color="#fff" /> : archived ? <ArchiveIcon /> : <SyncIcon />}
-            {syncingKey === "all"
-              ? "Syncing..."
-              : archived
-              ? "SOS → StockTrim Sync (Archived)"
-              : "SOS → StockTrim Sync"}
+            {syncingKey === "all" ? <Spinner size={20} color="#fff" /> : <SyncIcon />}
+            {syncingKey === "all" ? "Syncing..." : "SOS → StockTrim Sync"}
           </button>
 
           {/* ── Archived filter bar ── */}
@@ -685,37 +689,75 @@ export default function App() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, maxWidth: 640, margin: "0 auto 0" }}>
             {INDIVIDUAL_SYNCS.map(({ key, label, endpoint, method, startMsg, successMsg }) => {
               const isThisLoading = syncingKey === key;
-              const archivedLabel = archived ? `${label} (Archived)` : label;
+              const supportsArchived = ARCHIVED_KEYS.includes(key);
+              // In archived mode: non-order buttons are fully disabled; order buttons are active with archived styling
+              const isDisabledByArchived = archived && !supportsArchived;
+              const isDisabled = isBusy || isDisabledByArchived;
+              const showArchivedStyle = archived && supportsArchived;
+
               return (
                 <button
                   key={key}
                   onClick={() => runSync(key, endpoint, method, startMsg, successMsg)}
-                  disabled={isBusy}
+                  disabled={isDisabled}
+                  title={isDisabledByArchived ? "Not available in archived mode" : undefined}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
                     justifyContent: "center",
                     gap: 7,
-                    background: isThisLoading ? "#f0f9ff" : archived ? "#eff6ff" : "#fff",
-                    color: isThisLoading || archived ? "#2563eb" : "#374151",
-                    border: `1.5px solid ${isThisLoading ? "#93c5fd" : archived ? "#bfdbfe" : "#e2e8f0"}`,
+                    background: isThisLoading
+                      ? "#f0f9ff"
+                      : showArchivedStyle
+                      ? "#eff6ff"
+                      : "#fff",
+                    color: isThisLoading || showArchivedStyle ? "#2563eb" : "#374151",
+                    border: `1.5px solid ${
+                      isThisLoading
+                        ? "#93c5fd"
+                        : showArchivedStyle
+                        ? "#bfdbfe"
+                        : "#e2e8f0"
+                    }`,
                     padding: "11px 14px",
                     borderRadius: 9,
                     fontSize: 13,
                     fontWeight: 600,
-                    cursor: isBusy ? "not-allowed" : "pointer",
+                    cursor: isDisabled ? "not-allowed" : "pointer",
                     fontFamily: "Inter, sans-serif",
                     letterSpacing: "-0.01em",
                     transition: "all 0.15s",
-                    opacity: isBusy && !isThisLoading ? 0.45 : 1,
+                    opacity: isDisabledByArchived ? 0.35 : isBusy && !isThisLoading ? 0.45 : 1,
                     boxShadow: isThisLoading ? "0 0 0 3px rgba(59,130,246,0.12)" : "none",
                     whiteSpace: "nowrap",
                   }}
-                  onMouseEnter={(e) => { if (!isBusy) { e.currentTarget.style.borderColor = "#93c5fd"; e.currentTarget.style.background = "#f0f9ff"; e.currentTarget.style.color = "#2563eb"; } }}
-                  onMouseLeave={(e) => { if (!isBusy && !isThisLoading) { e.currentTarget.style.borderColor = archived ? "#bfdbfe" : "#e2e8f0"; e.currentTarget.style.background = archived ? "#eff6ff" : "#fff"; e.currentTarget.style.color = archived ? "#2563eb" : "#374151"; } }}
+                  onMouseEnter={(e) => {
+                    if (!isDisabled) {
+                      e.currentTarget.style.borderColor = "#93c5fd";
+                      e.currentTarget.style.background = "#f0f9ff";
+                      e.currentTarget.style.color = "#2563eb";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isDisabled && !isThisLoading) {
+                      e.currentTarget.style.borderColor = showArchivedStyle ? "#bfdbfe" : "#e2e8f0";
+                      e.currentTarget.style.background = showArchivedStyle ? "#eff6ff" : "#fff";
+                      e.currentTarget.style.color = showArchivedStyle ? "#2563eb" : "#374151";
+                    }
+                  }}
                 >
-                  {isThisLoading ? <Spinner size={14} color="#2563eb" /> : archived ? <ArchiveIcon /> : <SyncIcon />}
-                  {isThisLoading ? "Syncing..." : archivedLabel}
+                  {isThisLoading ? (
+                    <Spinner size={14} color="#2563eb" />
+                  ) : showArchivedStyle ? (
+                    <ArchiveIcon />
+                  ) : (
+                    <SyncIcon />
+                  )}
+                  {isThisLoading
+                    ? "Syncing..."
+                    : showArchivedStyle
+                    ? `${label} (Archived)`
+                    : label}
                 </button>
               );
             })}

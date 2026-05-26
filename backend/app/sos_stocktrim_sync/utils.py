@@ -318,9 +318,6 @@ async def fetch_page(
         },
     )
 
-    print(response.url)
-    print(response.status_code)
-
     # Helpful for debugging throttling
     if response.status_code != 200:
         print(response.text)
@@ -340,7 +337,7 @@ async def api_get(
     """
 
     if params is None:
-        params = {"archived": "both"}  # default to non-archived items, adjust as needed
+        params = {}  # default to non-archived items, adjust as needed
 
     token = get_access_token()
 

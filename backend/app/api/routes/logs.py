@@ -11,7 +11,6 @@ JSONL_LOGS_DIR = Path(__file__).parent.parent.parent / "logs" / "jsonl"  # adjus
 def get_today_logs():
     today = datetime.now(timezone.utc).strftime("%d-%m-%Y")
     log_file = JSONL_LOGS_DIR / f"{today}.log"
-    print(log_file)
 
     if not log_file.exists():
         return []  # no log file yet today — return empty, not a 404
