@@ -92,7 +92,7 @@ async def sync_all_data_to_stocktrim() -> None:
 
 @router.get("/sync/{type}/")
 async def read_sos_inventory_data(
-    session: SessionDep, current_user: CurrentUser, type: Literal["item", "customer", "vendor", "salesorder", "purchaseorder", "location"]
+    session: SessionDep, type: Literal["item", "customer", "vendor", "salesorder", "purchaseorder", "location"]
 ) -> Any:
     """
     Read inventory data from SOS.

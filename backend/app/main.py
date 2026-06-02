@@ -18,7 +18,7 @@ if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
 
 
 # Register all scheduled jobs
-def setup_scheduled_jobs(minutes: int = 60) -> None:
+def setup_scheduled_jobs(minutes: int = 60*24*7) -> None:
     """Register all scheduled sync jobs."""
     register_job(
         job_id="sync_all_data",

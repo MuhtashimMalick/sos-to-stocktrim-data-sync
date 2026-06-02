@@ -213,6 +213,8 @@ def map_stocktrim_po_to_sos(data: STCreatePORequest) -> dict:
     """
     sos_lines = []
     for i, line in enumerate(data.lines, start=1):
+        if not line.productId:
+            continue
         sos_line = {
             "lineNumber": i,
             "item": {"name": line.productId},
@@ -244,7 +246,7 @@ def map_stocktrim_po_to_sos(data: STCreatePORequest) -> dict:
     # SOS defaults to USD — only send if different to avoid rejection
     if data.currency and data.currency != "USD":
         payload["currency"] = data.currency
-
+    print(payload)
     return payload
 
 
@@ -286,6 +288,7 @@ async def sync_purchase_orders_to_stocktrim(
             }
 
         except Exception as e:
+            print(payload)
             print(f"Failed to sync purchase order to StockTrim: {str(e)}")
             logger.error(
                 f"Failed to sync purchase order to StockTrim {str(e)}",
@@ -352,7 +355,8 @@ async def sync_purchase_order_from_sos(
             "to": f"{to_date}T23:59:59" if to_date else None
         }
         purchase_orders = await api_get("/api/v2/purchaseorder", params=params)
-
+        # Limit to 5 purchase orders
+        purchase_orders["data"] = purchase_orders["data"][:500]
         sync_result = await sync_purchase_orders_to_stocktrim(
             purchase_orders
         )
@@ -362,6 +366,7 @@ async def sync_purchase_order_from_sos(
         }
 
     except Exception as e:
+        print(str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
