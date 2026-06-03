@@ -75,19 +75,8 @@ def build_jsonl_entry(
     action_variant: str,
     status: str,
     message: str,
+    failed_details: list[dict] | None = None,  # add this
 ) -> str:
-    """
-    Builds a JSON string representing one log entry.
-
-    Args:
-        action_type:    Human-readable action label e.g. "Export Unleashed"
-        action_variant: Machine-readable slug e.g. "export-unleashed"
-        status:         "Success", "Failed", "Pending", etc.
-        message:        Descriptive message for this log entry
-
-    Returns:
-        A JSON string ready to be passed to the jsonl logger.
-    """
     entry = {
         "id": str(uuid.uuid4()),
         "timestamp": datetime.now(tz=TIMEZONE).isoformat(),
@@ -96,4 +85,8 @@ def build_jsonl_entry(
         "status": status,
         "message": message,
     }
+
+    if failed_details:
+        entry["failedDetails"] = failed_details  # only included when there are failures
+
     return json.dumps(entry)

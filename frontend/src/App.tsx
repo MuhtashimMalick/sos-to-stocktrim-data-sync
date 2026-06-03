@@ -3,6 +3,11 @@ import React, { useState, useEffect } from "react";
 // ─── Types ────────────────────────────────────────────────────────────────────
 type LogLevel = "Success" | "Info" | "Error";
 
+interface FailedDetail {
+  purchase_order_number: string;
+  reason: string;
+}
+
 interface LogEntry {
   id: string;
   timestamp: string;
@@ -10,6 +15,7 @@ interface LogEntry {
   actionVariant: string;
   status: LogLevel;
   message: string;
+  failedDetails?: FailedDetail[];  // add this
 }
 
 type SyncFrequency = "Hourly" | "Every 6 Hours" | "Daily" | "Weekly";
@@ -477,12 +483,110 @@ const ArchivedFilter = ({
   );
 };
 
+const FailedDetailsModal = ({
+  details,
+  actionType,
+  onClose,
+}: {
+  details: FailedDetail[];
+  actionType: string;
+  onClose: () => void;
+}) => {
+  const [search, setSearch] = useState("");
+
+  const filtered = details.filter(
+    (d) =>
+      d.purchase_order_number?.toLowerCase().includes(search.toLowerCase()) ||
+      d.reason?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(30,41,59,0.45)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.15s ease" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 680, maxHeight: "80vh", margin: "0 16px", boxShadow: "0 20px 60px rgba(30,41,59,0.18)", display: "flex", flexDirection: "column", overflow: "hidden", animation: "slideUp 0.2s ease" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "22px 28px 18px", borderBottom: "1px solid #f1f5f9", flexShrink: 0 }}>
+          <div>
+            <h2 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "#1E293B" }}>Sync Failures</h2>
+            <p style={{ margin: 0, fontSize: 13, color: "#64748B" }}>{actionType}</p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ background: "rgba(239,68,68,0.1)", color: "#dc2626", fontSize: 13, fontWeight: 600, padding: "4px 10px", borderRadius: 6 }}>
+              {details.length} {details.length === 1 ? "failure" : "failures"}
+            </span>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#64748B", padding: 4, borderRadius: 6, display: "flex", alignItems: "center" }}>
+              <XIcon />
+            </button>
+          </div>
+        </div>
+
+        {/* Search */}
+        <div style={{ padding: "14px 28px", borderBottom: "1px solid #f1f5f9", flexShrink: 0 }}>
+          <input
+            type="text"
+            placeholder="Search by identifier or error reason..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ width: "100%", padding: "9px 14px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 14, color: "#1E293B", fontFamily: "Inter, sans-serif", outline: "none", boxSizing: "border-box", transition: "border-color 0.15s" }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = "#3B82F6")}
+            onBlur={(e) => (e.currentTarget.style.borderColor = "#e2e8f0")}
+          />
+        </div>
+
+        {/* Table */}
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: "32px 28px", textAlign: "center", color: "#94a3b8", fontSize: 14 }}>
+              No results matching "{search}"
+            </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "#f8fafc", position: "sticky", top: 0, zIndex: 1 }}>
+                  <th style={{ textAlign: "left", padding: "10px 28px", color: "#64748B", fontWeight: 600, borderBottom: "1px solid #f1f5f9", width: "30%" }}>Identifier</th>
+                  <th style={{ textAlign: "left", padding: "10px 28px 10px 0", color: "#64748B", fontWeight: 600, borderBottom: "1px solid #f1f5f9" }}>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((d, i) => (
+                  <tr key={i} style={{ borderBottom: i < filtered.length - 1 ? "1px solid #f8fafc" : "none" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#fafafa")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <td style={{ padding: "12px 28px", fontWeight: 600, color: "#1E293B", verticalAlign: "top", whiteSpace: "nowrap" }}>
+                      {d.purchase_order_number ?? "—"}
+                    </td>
+                    <td style={{ padding: "12px 28px 12px 0", color: "#dc2626", fontFamily: "ui-monospace, monospace", fontSize: 12, lineHeight: 1.6, wordBreak: "break-word", verticalAlign: "top" }}>
+                      {d.reason}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Footer */}
+        {filtered.length !== details.length && (
+          <div style={{ padding: "12px 28px", borderTop: "1px solid #f1f5f9", fontSize: 13, color: "#64748B", flexShrink: 0 }}>
+            Showing {filtered.length} of {details.length} failures
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [syncingKey, setSyncingKey] = useState<SyncKey | null>(null);
+  const [failureModal, setFailureModal] = useState<{ details: FailedDetail[]; actionType: string } | null>(null);
 
   // ── Archived filter state ──
   const [archived, setArchived] = useState(false);
@@ -827,9 +931,23 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  <span style={{ fontSize: 13, color: "#94a3b8", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
-                    {new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                    {/* Failures button — only shown when failedDetails present */}
+                    {log.failedDetails && log.failedDetails.length > 0 && (
+                      <button
+                        onClick={() => setFailureModal({ details: log.failedDetails!, actionType: log.actionType })}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1.5px solid rgba(239,68,68,0.2)", padding: "5px 12px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "Inter, sans-serif", transition: "all 0.15s", whiteSpace: "nowrap" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.14)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.08)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.2)"; }}
+                      >
+                        <ErrorCircleIcon />
+                        {log.failedDetails.length} {log.failedDetails.length === 1 ? "failure" : "failures"}
+                      </button>
+                    )}
+                    <span style={{ fontSize: 13, color: "#94a3b8", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                      {new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    </span>
+                  </div>
                 </div>
               ))
             )}
@@ -854,6 +972,13 @@ export default function App() {
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+      {failureModal && (
+        <FailedDetailsModal
+          details={failureModal.details}
+          actionType={failureModal.actionType}
+          onClose={() => setFailureModal(null)}
+        />
+      )}
     </>
   );
 }
