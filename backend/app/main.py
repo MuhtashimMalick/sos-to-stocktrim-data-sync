@@ -53,7 +53,7 @@ def setup_scheduled_jobs(minutes: int = 60*24*7) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Setup and start the scheduler
-    setup_scheduled_jobs(minutes=60)
+    setup_scheduled_jobs(minutes=4320) # 3 days
     await start_scheduler()
     yield
     # Shutdown: Shutdown the scheduler
