@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
 from app.logging_config import get_jsonl_logger, build_jsonl_entry
+from tenacity import RetryError
 
 router = APIRouter(prefix="/purchaseorder", tags=["purchaseorder"])
 
@@ -158,6 +159,8 @@ def map_sos_po_to_stocktrim(data: SOSPurchaseOrderRequest) -> dict:
     # Build line items
     line_items = []
     for line in data.lines or []:
+        if not line.item or not line.item.id:
+            continue
         st_line = {
             "productId": line.item.id if line.item else None,   # SKU stored in item.name
             "quantity": float(line.quantity or 0),
@@ -287,6 +290,27 @@ async def sync_purchase_orders_to_stocktrim(
                 "result": result,
             }
 
+        except RetryError as re:
+            cause = re.last_attempt.exception()  # fixed: was `e.last_attempt`
+            error_msg = f"{type(cause).__name__}: {cause}"
+            print(payload)
+            print(f"Failed to sync purchase order to StockTrim: {error_msg}")
+            logger.error(
+                f"Failed to sync purchase order to StockTrim after retries: {error_msg}",
+                extra={
+                    "error": error_msg,
+                    "payload": payload,
+                    "purchase_order_number": payload.get("purchaseOrderNumber"),
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": error_msg,  # now contains the real cause, not RetryError string
+                "payload": payload,
+                "purchase_order_number": payload.get("purchaseOrderNumber"),
+            }
+
         except Exception as e:
             print(payload)
             print(f"Failed to sync purchase order to StockTrim: {str(e)}")
@@ -313,13 +337,18 @@ async def sync_purchase_orders_to_stocktrim(
 
     results = await asyncio.gather(*tasks)
 
-    success = sum(
-        1 for r in results if r["status"] == "success"
-    )
+    success = sum(1 for r in results if r["status"] == "success")
 
-    failed = sum(
-        1 for r in results if r["status"] == "failed"
-    )
+    # Collect failed results with their reasons
+    failed_results = [r for r in results if r["status"] == "failed"]
+    failed = len(failed_results)
+    failed_details = [
+        {
+            "purchase_order_number": r["purchase_order_number"],
+            "reason": r["error"],
+        }
+        for r in failed_results
+    ]
 
     jsonl_logger.info(
         build_jsonl_entry(
@@ -327,6 +356,7 @@ async def sync_purchase_orders_to_stocktrim(
             action_variant=f"sync-purchase-orders-from-sos-to-stocktrim",
             status="Info",
             message=f"Synced {success} purchase orders successfully, {failed} failed.",
+            failed_details=failed_details if failed_details else None,  # only include if there are failures
         )
     )
 
@@ -334,7 +364,6 @@ async def sync_purchase_orders_to_stocktrim(
         "success": success,
         "failed": failed,
     }
-
 
 @router.post("/sync-from-sos")
 async def sync_purchase_order_from_sos(
@@ -356,7 +385,7 @@ async def sync_purchase_order_from_sos(
         }
         purchase_orders = await api_get("/api/v2/purchaseorder", params=params)
         # Limit to 5 purchase orders
-        purchase_orders["data"] = purchase_orders["data"][:500]
+        purchase_orders["data"] = purchase_orders["data"]
         sync_result = await sync_purchase_orders_to_stocktrim(
             purchase_orders
         )

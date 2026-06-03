@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
+from tenacity import RetryError
 
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
@@ -12,7 +13,7 @@ from app.logging_config import get_jsonl_logger, build_jsonl_entry
 
 router = APIRouter(prefix="/supplier", tags=["supplier"])
 
-STOCKTRIM_CONCURRENCY = 5
+STOCKTRIM_CONCURRENCY = 10
 
 # ---------------------------------------------------------------------------
 # SOS Inventory Models — mirrors the full SOS vendor/supplier response
@@ -156,8 +157,26 @@ async def sync_supplier_to_stocktrim(vendors: dict[str, Any | list]):
 
             return {"status": "success", "result": result}
 
+        except RetryError as re:
+            cause = re.last_attempt.exception()
+            error_msg = f"{type(cause).__name__}: {cause}"
+            logger.error(
+                f"Failed to sync supplier to StockTrim after retries: {error_msg}",
+                extra={
+                    "error": error_msg,
+                    "payload": payload,
+                    "vendor_id": vendor.get("id"),
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": error_msg,
+                "payload": payload,
+                "vendor_id": vendor.get("id"),
+            }
+
         except Exception as e:
-            # 🔥 IMPORTANT: log full context
             logger.error(
                 f"Failed to sync supplier to StockTrim: {str(e)}",
                 extra={
@@ -179,7 +198,15 @@ async def sync_supplier_to_stocktrim(vendors: dict[str, Any | list]):
     results = await asyncio.gather(*tasks)
 
     success = sum(1 for r in results if r["status"] == "success")
-    failed = sum(1 for r in results if r["status"] == "failed")
+    failed_results = [r for r in results if r["status"] == "failed"]
+    failed = len(failed_results)
+    failed_details = [
+        {
+            "vendor_id": r["vendor_id"],
+            "reason": r["error"],
+        }
+        for r in failed_results
+    ]
 
     jsonl_logger.info(
         build_jsonl_entry(
@@ -187,6 +214,7 @@ async def sync_supplier_to_stocktrim(vendors: dict[str, Any | list]):
             action_variant=f"sync-suppliers-from-sos-to-stocktrim",
             status="Info",
             message=f"Synced {success} suppliers successfully, {failed} failed.",
+            failed_details=failed_details if failed_details else None,
         )
     )
 

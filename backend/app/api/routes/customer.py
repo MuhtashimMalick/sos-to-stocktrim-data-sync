@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
+from tenacity import RetryError
 
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
@@ -73,7 +74,7 @@ def map_sos_customer_to_stocktrim(data: SOSCustomerRequest) -> dict:
     }
 
 
-STOCKTRIM_CONCURRENCY = 5
+STOCKTRIM_CONCURRENCY = 10
 
 logger = logging.getLogger(__name__)
 jsonl_logger = get_jsonl_logger()
@@ -100,6 +101,25 @@ async def sync_customer_to_stocktrim(customers: dict[str, Any | list]):
                 "customer_id": customer.get("id"),
             }
 
+        except RetryError as re:
+            cause = re.last_attempt.exception()
+            error_msg = f"{type(cause).__name__}: {cause}"
+            logger.error(
+                f"Failed to sync customer to StockTrim after retries: {error_msg}",
+                extra={
+                    "error": error_msg,
+                    "payload": payload,
+                    "customer_id": customer.get("id"),
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": error_msg,
+                "payload": payload,
+                "customer_id": customer.get("id"),
+            }
+
         except Exception as e:
             logger.error(
                 f"Failed to sync customer to StockTrim: {str(e)}",
@@ -122,7 +142,15 @@ async def sync_customer_to_stocktrim(customers: dict[str, Any | list]):
     results = await asyncio.gather(*tasks)
 
     success = sum(1 for r in results if r["status"] == "success")
-    failed = sum(1 for r in results if r["status"] == "failed")
+    failed_results = [r for r in results if r["status"] == "failed"]
+    failed = len(failed_results)
+    failed_details = [
+        {
+            "customer_id": r["customer_id"],
+            "reason": r["error"],
+        }
+        for r in failed_results
+    ]
 
     jsonl_logger.info(
         build_jsonl_entry(
@@ -130,6 +158,7 @@ async def sync_customer_to_stocktrim(customers: dict[str, Any | list]):
             action_variant=f"sync-customers-from-sos-to-stocktrim",
             status="Info",
             message=f"Synced {success} customers successfully, {failed} failed.",
+            failed_details=failed_details if failed_details else None,
         )
     )
 

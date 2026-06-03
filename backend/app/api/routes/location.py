@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
+from tenacity import RetryError
 
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
@@ -55,7 +56,7 @@ def map_sos_location_to_stocktrim(data: SOSLocationRequest) -> dict:
     }
 
 
-STOCKTRIM_CONCURRENCY = 5
+STOCKTRIM_CONCURRENCY = 10
 logger = logging.getLogger(__name__)
 jsonl_logger = get_jsonl_logger()
 
@@ -78,6 +79,24 @@ async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
             return {
                 "status": "success",
                 "result": result,
+            }
+
+        except RetryError as re:
+            cause = re.last_attempt.exception()
+            error_msg = f"{type(cause).__name__}: {cause}"
+            logger.error(
+                f"Failed to sync location to StockTrim after retries: {error_msg}",
+                extra={
+                    "error": error_msg,
+                    "payload": payload,
+                    "location_code": location.get("locationCode"),
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": error_msg,
+                "payload": payload,
                 "location_code": location.get("locationCode"),
             }
 
@@ -103,7 +122,15 @@ async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
     results = await asyncio.gather(*tasks)
 
     success = sum(1 for r in results if r["status"] == "success")
-    failed = sum(1 for r in results if r["status"] == "failed")
+    failed_results = [r for r in results if r["status"] == "failed"]
+    failed = len(failed_results)
+    failed_details = [
+        {
+            "location_code": r["location_code"],
+            "reason": r["error"],
+        }
+        for r in failed_results
+    ]
 
     jsonl_logger.info(
         build_jsonl_entry(
@@ -111,6 +138,7 @@ async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
             action_variant=f"sync-locations-from-sos-to-stocktrim",
             status="Info",
             message=f"Synced {success} locations successfully, {failed} failed.",
+            failed_details=failed_details if failed_details else None,
         )
     )
 

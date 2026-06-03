@@ -5,6 +5,7 @@ from typing import Any, Optional, List
 
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query
+from tenacity import RetryError
 
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
@@ -95,7 +96,7 @@ def map_sos_order_to_stocktrim(data: SOSSalesOrderRequest) -> List[dict]:
     return records
 
 
-STOCKTRIM_CONCURRENCY = 5
+STOCKTRIM_CONCURRENCY = 10
 logger = logging.getLogger(__name__)
 jsonl_logger = get_jsonl_logger()
 
@@ -135,6 +136,25 @@ async def sync_sales_orders_to_stocktrim(
                         "sales_order_number": payload.get("salesOrderNumber"),
                     })
 
+                except RetryError as re:
+                    cause = re.last_attempt.exception()
+                    error_msg = f"{type(cause).__name__}: {cause}"
+                    logger.error(
+                        f"Failed to sync sales order payload to StockTrim after retries: {error_msg}",
+                        extra={
+                            "error": error_msg,
+                            "payload": payload,
+                            "sales_order_number": payload.get("salesOrderNumber"),
+                        },
+                    )
+
+                    payload_results.append({
+                        "status": "failed",
+                        "error": error_msg,
+                        "payload": payload,
+                        "sales_order_number": payload.get("salesOrderNumber"),
+                    })
+
                 except Exception as e:
                     logger.error(
                         f"Failed to sync sales order payload to StockTrim {str(e)}",
@@ -155,6 +175,7 @@ async def sync_sales_orders_to_stocktrim(
             return {
                 "status": "completed",
                 "results": payload_results,
+                "sales_order_number": saleorder.get("number"),
             }
 
         except Exception as e:
@@ -170,6 +191,7 @@ async def sync_sales_orders_to_stocktrim(
                 "status": "failed",
                 "error": str(e),
                 "sales_order": saleorder,
+                "sales_order_number": saleorder.get("number"),
             }
 
     tasks = [
@@ -180,20 +202,18 @@ async def sync_sales_orders_to_stocktrim(
     results = await asyncio.gather(*tasks)
 
     success = 0
-    failed = 0
+    failed_results = []
 
     for order in results:
-
         if order["status"] == "failed":
-            failed += 1
+            failed_results.append({
+                "sales_order_number": order.get("sales_order_number"),
+                "reason": order.get("error"),
+            })
         else:
             success += 1
 
-        # for r in order["results"]:
-        #     if r["status"] == "success":
-        #         success += 1
-        #     else:
-        #         failed += 1
+    failed = len(failed_results)
 
     jsonl_logger.info(
         build_jsonl_entry(
@@ -201,6 +221,7 @@ async def sync_sales_orders_to_stocktrim(
             action_variant=f"sync-sales-orders-from-sos-to-stocktrim",
             status="Info",
             message=f"Synced {success} sales orders successfully, {failed} failed.",
+            failed_details=failed_results if failed_results else None,
         )
     )
 

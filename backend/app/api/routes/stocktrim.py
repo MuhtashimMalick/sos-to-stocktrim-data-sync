@@ -3,7 +3,7 @@ import httpx
 import json
 import logging
 
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, RetryError
 from typing import Dict, Any, Optional
 
 from pydantic import BaseModel
@@ -138,7 +138,7 @@ def map_sos_to_stocktrim(data: SOSItemRequest) -> dict:
 
 logger = logging.getLogger(__name__)
 jsonl_logger = get_jsonl_logger()
-STOCKTRIM_CONCURRENCY = 5
+STOCKTRIM_CONCURRENCY = 10
 
 
 async def sync_items_to_stocktrim(items: dict[str, Any | list]):
@@ -162,6 +162,25 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
                 "item_id": item.get("id"),
                 "sku": payload.get("code"),
                 "result": result,
+            }
+
+        except RetryError as re:
+            cause = re.last_attempt.exception()
+            error_msg = f"{type(cause).__name__}: {cause}"
+            logger.error(
+                f"Failed to sync product to StockTrim after retries: {error_msg}",
+                extra={
+                    "error": error_msg,
+                    "payload": item,
+                    "item_id": item.get("id"),
+                },
+            )
+
+            return {
+                "status": "failed",
+                "error": error_msg,
+                "item_id": item.get("id"),
+                "payload": item,
             }
 
         except Exception as e:
@@ -192,9 +211,15 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
         1 for r in results if r["status"] == "success"
     )
 
-    failed = sum(
-        1 for r in results if r["status"] == "failed"
-    )
+    failed_results = [r for r in results if r["status"] == "failed"]
+    failed = len(failed_results)
+    failed_details = [
+        {
+            "item_id": r["item_id"],
+            "reason": r["error"],
+        }
+        for r in failed_results
+    ]
 
     jsonl_logger.info(
         build_jsonl_entry(
@@ -202,6 +227,7 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
             action_variant=f"sync-products-from-sos-to-stocktrim",
             status="Info",
             message=f"Synced {success} products successfully, {failed} failed.",
+            failed_details=failed_details if failed_details else None,
         )
     )
 
