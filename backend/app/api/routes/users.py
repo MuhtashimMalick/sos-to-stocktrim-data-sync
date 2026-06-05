@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Any
 
@@ -28,9 +29,12 @@ from app.models import (
     UserUpdateMe,
 )
 from app.utils import generate_new_account_email, send_email
+from app.core.scheduler import start_scheduler, shutdown_scheduler, register_job
+from app.api.routes.sos_stocktrim import sync_all_data_to_stocktrim
+
 
 router = APIRouter(prefix="/users", tags=["users"])
-
+logger = logging.getLogger(__name__)
 
 @router.get(
     "/",
@@ -263,11 +267,11 @@ def get_my_preferences(
 
 
 @router.put("/me/preference", response_model=UserPreferenceRead)
-def update_my_preferences(
+async def update_my_preferences(
     payload: UserPreferenceUpdate,
     session: SessionDep,
 ):
-    current_user_id = "d076cffe-832e-45dc-adbd-09b4d189460e"
+    current_user_id = session.exec(select(User.id)).first()
     stmt = select(UserPreference).where(
         UserPreference.user_id == current_user_id)
     pref = session.exec(stmt).first()
@@ -275,7 +279,7 @@ def update_my_preferences(
     if not pref:
         pref = UserPreference(
             user_id=current_user_id,
-            sync_after_mins=60,
+            sync_after_mins=4320,
             enable_auto_sync=True,
         )
         session.add(pref)
@@ -291,5 +295,19 @@ def update_my_preferences(
     session.add(pref)
     session.commit()
     session.refresh(pref)
+
+    if pref.enable_auto_sync:
+        await shutdown_scheduler()
+        logger.info(f"Auto-sync enabled. Syncing every {pref.sync_after_mins} minutes.")
+        register_job(
+            job_id="sync_all_data",
+            func=sync_all_data_to_stocktrim,
+            minutes=pref.sync_after_mins,
+            name="Sync all data from SOS to StockTrim"
+        )
+        await start_scheduler()
+    else:
+        logger.info("Auto-sync disabled. Stopping scheduler.")
+        await shutdown_scheduler()
 
     return pref

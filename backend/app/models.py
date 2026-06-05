@@ -69,7 +69,7 @@ class UserPreference(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     # Run APScheduler sync every X minutes
     sync_after_mins: int = Field(
-        default=60,
+        default=1440, # 24 hours
         nullable=False,
     )
     # Enable/disable automatic sync

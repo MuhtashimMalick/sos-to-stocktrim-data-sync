@@ -1,13 +1,18 @@
+import logging
+
+from app.models import UserPreference
 import sentry_sdk
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from starlette.middleware.cors import CORSMiddleware
+from sqlmodel import Session, select
 
 from app.api.main import api_router
 from app.core.config import settings
 from app.core.scheduler import register_job, start_scheduler, shutdown_scheduler
 from app.api.routes.sos_stocktrim import sync_all_data_to_stocktrim
+from app.api.deps import get_db
 
 def custom_generate_unique_id(route: APIRoute) -> str:
     return f"{route.tags[0]}-{route.name}"
@@ -16,6 +21,7 @@ def custom_generate_unique_id(route: APIRoute) -> str:
 if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
     sentry_sdk.init(dsn=str(settings.SENTRY_DSN), enable_tracing=True)
 
+session: Session = get_db().__next__()
 
 # Register all scheduled jobs
 def setup_scheduled_jobs(minutes: int = 60*24*7) -> None:
@@ -49,15 +55,23 @@ def setup_scheduled_jobs(minutes: int = 60*24*7) -> None:
     #     name="Sync Inventory Items from SOS to StockTrim"
     # )
 
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Setup and start the scheduler
-    setup_scheduled_jobs(minutes=4320) # 3 days
-    await start_scheduler()
-    yield
-    # Shutdown: Shutdown the scheduler
-    await shutdown_scheduler()
+    user_preferences = session.exec(select(UserPreference)).first()
+
+    if user_preferences is None or user_preferences.enable_auto_sync:
+        minutes = user_preferences.sync_after_mins if user_preferences else 4320
+        logger.info(f"Auto-sync enabled. Syncing every {minutes} minutes.")
+        setup_scheduled_jobs(minutes=minutes)
+        await start_scheduler()
+        yield
+        await shutdown_scheduler()
+    else:
+        if user_preferences and not user_preferences.enable_auto_sync:
+            logger.info("Auto-sync is disabled in user preferences. Scheduler will not start.")
+        yield
 
 
 app = FastAPI(

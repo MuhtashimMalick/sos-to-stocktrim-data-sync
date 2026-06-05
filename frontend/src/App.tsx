@@ -18,7 +18,7 @@ interface LogEntry {
   failedDetails?: FailedDetail[];  // add this
 }
 
-type SyncFrequency = "Hourly" | "Every 6 Hours" | "Daily" | "Weekly";
+type SyncFrequency =  "Daily" | "Every 3 Days" | "Weekly";
 
 type SyncKey =
   | "all"
@@ -41,7 +41,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "locations",
     label: "Sync Locations",
-    endpoint: "http://146.190.210.58:8000/api/v1/location/create-location",
+    endpoint: "http://localhost:8000/api/v1/location/create-location",
     method: "POST",
     startMsg: "Syncing locations...",
     successMsg: "Locations synced successfully.",
@@ -49,7 +49,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "suppliers",
     label: "Sync Suppliers",
-    endpoint: "http://146.190.210.58:8000/api/v1/supplier/create-supplier",
+    endpoint: "http://localhost:8000/api/v1/supplier/create-supplier",
     method: "POST",
     startMsg: "Syncing suppliers...",
     successMsg: "Suppliers synced successfully.",
@@ -57,7 +57,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "customers",
     label: "Sync Customers",
-    endpoint: "http://146.190.210.58:8000/api/v1/customer/create-customer",
+    endpoint: "http://localhost:8000/api/v1/customer/create-customer",
     method: "PUT",
     startMsg: "Syncing customers...",
     successMsg: "Customers synced successfully.",
@@ -65,7 +65,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "products",
     label: "Sync Products",
-    endpoint: "http://146.190.210.58:8000/api/v1/stocktrim/create-item",
+    endpoint: "http://localhost:8000/api/v1/stocktrim/create-item",
     method: "POST",
     startMsg: "Syncing products...",
     successMsg: "Products synced successfully.",
@@ -73,7 +73,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "purchase_orders",
     label: "Sync Purchase Orders",
-    endpoint: "http://146.190.210.58:8000/api/v1/purchaseorder/sync-from-sos",
+    endpoint: "http://localhost:8000/api/v1/purchaseorder/sync-from-sos",
     method: "POST",
     startMsg: "Syncing purchase orders...",
     successMsg: "Purchase orders synced successfully.",
@@ -81,7 +81,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "sales_orders",
     label: "Sync Sales Orders",
-    endpoint: "http://146.190.210.58:8000/api/v1/salesorder/create-sales-order",
+    endpoint: "http://localhost:8000/api/v1/salesorder/create-sales-order",
     method: "POST",
     startMsg: "Syncing sales orders...",
     successMsg: "Sales orders synced successfully.",
@@ -194,29 +194,28 @@ const Badge = ({ level }: { level: LogLevel }) => {
 
 // ─── Settings Modal ────────────────────────────────────────────────────────────
 const frequencyToMinutes: Record<SyncFrequency, number> = {
-  Hourly: 60, "Every 6 Hours": 360, Daily: 1440, Weekly: 10080,
+  Daily: 1440, "Every 3 Days": 4320, Weekly: 10080,
 };
 
 const minutesToFrequency = (mins: number): SyncFrequency => {
-  if (mins === 360) return "Every 6 Hours";
   if (mins === 1440) return "Daily";
-  if (mins === 10080) return "Weekly";
-  return "Hourly";
+  if (mins === 4320) return "Every 3 Days";
+  return "Weekly";
 };
 
 const SettingsModal = ({ onClose }: { onClose: () => void }) => {
-  const [frequency, setFrequency] = useState<SyncFrequency>("Hourly");
+  const [frequency, setFrequency] = useState<SyncFrequency>("Daily");
   const [autoSync, setAutoSync] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const frequencies: SyncFrequency[] = ["Hourly", "Every 6 Hours", "Daily", "Weekly"];
+  const frequencies: SyncFrequency[] = ["Daily", "Every 3 Days", "Weekly"];
 
   useEffect(() => {
     const loadPreferences = async () => {
       try {
-        const response = await fetch("http://146.190.210.58:8000/api/v1/users/me/preference");
+        const response = await fetch("http://localhost:8000/api/v1/users/me/preference");
         if (!response.ok) throw new Error("Failed to load preferences");
         const data = await response.json();
         setFrequency(minutesToFrequency(data.sync_after_mins));
@@ -233,7 +232,8 @@ const SettingsModal = ({ onClose }: { onClose: () => void }) => {
   const handleSave = async () => {
     try {
       setSaving(true);
-      const response = await fetch("http://146.190.210.58:8000/api/v1/users/me/preference", {
+      console.log(JSON.stringify({ sync_after_mins: frequencyToMinutes[frequency], enable_auto_sync: autoSync }))
+      const response = await fetch("http://localhost:8000/api/v1/users/me/preference", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sync_after_mins: frequencyToMinutes[frequency], enable_auto_sync: autoSync }),
@@ -639,7 +639,7 @@ export default function App() {
     setLogsLoading(true);
     setLogsError(null);
     try {
-      const res = await fetch("http://146.190.210.58:8000/api/v1/logs/today");
+      const res = await fetch("http://localhost:8000/api/v1/logs/today");
       if (!res.ok) throw new Error(`Failed to fetch logs (HTTP ${res.status})`);
       const data: LogEntry[] = await res.json();
       setLogs(data);
@@ -708,7 +708,7 @@ export default function App() {
   const handleSync = () =>
     runSync(
       "all",
-      "http://146.190.210.58:8000/api/v1/sos-stocktrim/sync-all-data-to-stocktrim/",
+      "http://localhost:8000/api/v1/sos-stocktrim/sync-all-data-to-stocktrim/",
       "POST",
       "Syncing all data to StockTrim...",
       "All data synced to StockTrim successfully.",
