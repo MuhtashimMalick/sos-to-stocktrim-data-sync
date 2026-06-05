@@ -248,7 +248,7 @@ def delete_user(
 def get_my_preferences(
     session: SessionDep,
 ):
-    current_user_id = "d076cffe-832e-45dc-adbd-09b4d189460e"
+    current_user_id = session.exec(select(User.id)).first()
     stmt = select(UserPreference).where(
         UserPreference.user_id == current_user_id)
     pref = session.exec(stmt).first()
