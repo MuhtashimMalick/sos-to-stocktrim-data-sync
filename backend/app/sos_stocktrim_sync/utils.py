@@ -372,7 +372,7 @@ async def api_get(
                     endpoint=endpoint,
                     token=token,
                     params=params,
-                    start=start,
+                    start=start+1,
                     maxresults=MAX_RESULTS,
                 )
 
