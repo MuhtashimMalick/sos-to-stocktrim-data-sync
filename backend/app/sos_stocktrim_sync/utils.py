@@ -341,71 +341,82 @@ async def api_get(
 
     token = get_access_token()
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
+    try:
 
-        # First request
-        first_page = await fetch_page(
-            client=client,
-            endpoint=endpoint,
-            token=token,
-            params=params,
-            start=0,
-            maxresults=MAX_RESULTS,
-        )
+        async with httpx.AsyncClient(timeout=300.0) as client:
 
-        items = first_page.get("data", []) or []
-        total_count = first_page.get("totalCount", 0)
+            # First request
+            first_page = await fetch_page(
+                client=client,
+                endpoint=endpoint,
+                token=token,
+                params=params,
+                start=0,
+                maxresults=MAX_RESULTS,
+            )
 
-        # Remaining offsets
-        starts = range(MAX_RESULTS, total_count, MAX_RESULTS)
+            items = first_page.get("data", []) or []
+            total_count = first_page.get("totalCount", 0)
 
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+            # Remaining offsets
+            starts = range(MAX_RESULTS, total_count, MAX_RESULTS)
 
-        async def limited_fetch(start: int):
-            async with semaphore:
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
-                # Tiny delay helps avoid SOS throttling
-                # await asyncio.sleep(0.6)
+            async def limited_fetch(start: int):
+                async with semaphore:
 
-                return await fetch_page(
-                    client=client,
-                    endpoint=endpoint,
-                    token=token,
-                    params=params,
-                    start=start+1,
-                    maxresults=MAX_RESULTS,
+                    # Tiny delay helps avoid SOS throttling
+                    # await asyncio.sleep(0.6)
+
+                    return await fetch_page(
+                        client=client,
+                        endpoint=endpoint,
+                        token=token,
+                        params=params,
+                        start=start+1,
+                        maxresults=MAX_RESULTS,
+                    )
+
+            tasks = [
+                limited_fetch(start)
+                for start in starts
+            ]
+
+            if tasks:
+                results = await asyncio.gather(*tasks)
+
+                for result in results:
+                    # print(result)
+                    items.extend(result.get("data", []) or [])
+
+            item_map = {
+                "item": "product",
+                "vendor": "supplier",
+                "customer": "customer",
+                "location": "location",
+                "salesorder": "sales order",
+                "purchaseorder": "purchase order",
+            }
+            item_type = item_map.get(endpoint.split("/")[-1])
+            jsonl_logger.info(
+                build_jsonl_entry(
+                    action_type=f"Fetch {item_type}s from SOS Inventory",
+                    action_variant=f"fetch-{item_type}s-from-sos-inventory",
+                    status="Info",
+                    message=f"Fetched {len(items)} {item_type}s from SOS Inventory",
                 )
-
-        tasks = [
-            limited_fetch(start)
-            for start in starts
-        ]
-
-        if tasks:
-            results = await asyncio.gather(*tasks)
-
-            for result in results:
-                # print(result)
-                items.extend(result.get("data", []) or [])
-
-        item_map = {
-            "item": "product",
-            "vendor": "supplier",
-            "customer": "customer",
-            "location": "location",
-            "salesorder": "sales order",
-            "purchaseorder": "purchase order",
-        }
-        item_type = item_map.get(endpoint.split("/")[-1])
-        jsonl_logger.info(
+            )
+            return {"data": items}
+    except Exception as e:
+        jsonl_logger.error(
             build_jsonl_entry(
                 action_type=f"Fetch {item_type}s from SOS Inventory",
                 action_variant=f"fetch-{item_type}s-from-sos-inventory",
-                status="Info",
-                message=f"Fetched {len(items)} {item_type}s from SOS Inventory",
+                status="Error",
+                message=f"Failed to fetch {item_type}s from SOS Inventory: {str(e)}",
             )
         )
-        return {"data": items}
 
 
 def api_post(endpoint: str, payload: dict = None) -> dict:
