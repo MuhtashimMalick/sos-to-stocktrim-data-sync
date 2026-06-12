@@ -341,7 +341,7 @@ async def api_get(
 
     token = get_access_token()
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
 
         # First request
         first_page = await fetch_page(
