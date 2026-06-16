@@ -12,6 +12,8 @@ from app.sos_stocktrim_sync.utils import api_get
 from app.logging_config import get_jsonl_logger, build_jsonl_entry
 from app.utils import generate_scan_complete_email, send_email
 from tenacity import RetryError
+from app.core.config import settings
+
 
 router = APIRouter(prefix="/purchaseorder", tags=["purchaseorder"])
 

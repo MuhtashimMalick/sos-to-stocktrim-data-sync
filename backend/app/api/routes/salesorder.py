@@ -12,6 +12,8 @@ from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
 from app.logging_config import get_jsonl_logger, build_jsonl_entry
 from app.utils import generate_scan_complete_email, send_email
+from app.core.config import settings
+
 
 router = APIRouter(prefix="/salesorder", tags=["salesorder"])
 # --- SOS Nested Model

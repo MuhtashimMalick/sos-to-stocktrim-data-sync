@@ -14,6 +14,8 @@ from app.api.routes.customer import sync_customer_to_stocktrim
 from app.api.deps import CurrentUser, SessionDep
 from app.sos_stocktrim_sync.utils import api_get
 from app.utils import generate_scan_complete_email, send_email
+from app.core.config import settings
+
 
 router = APIRouter(prefix="/sos-stocktrim", tags=["sos-stocktrim"])
 
