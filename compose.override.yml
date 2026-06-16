@@ -40,11 +40,11 @@ services:
       - run
       - --reload
       - "app/main.py"
-    environment:
-      SMTP_HOST: "mailcatcher"
-      SMTP_PORT: "1025"
-      SMTP_TLS: "false"
-      EMAILS_FROM_EMAIL: "noreply@example.com"
+    # environment:
+    #   SMTP_HOST: "mailcatcher"
+    #   SMTP_PORT: "1025"
+    #   SMTP_TLS: "false"
+    #   EMAILS_FROM_EMAIL: "noreply@example.com"
 
   frontend:
     restart: "no"

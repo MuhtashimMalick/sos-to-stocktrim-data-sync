@@ -3,6 +3,7 @@ import httpx
 import json
 import logging
 
+from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, RetryError
 from typing import Dict, Any, Optional
 
@@ -12,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 from app.core.config import settings
 from app.sos_stocktrim_sync.utils import api_get
 from app.logging_config import get_jsonl_logger, build_jsonl_entry
+from app.utils import generate_scan_complete_email, send_email
 
 router = APIRouter(prefix="/stocktrim", tags=["stocktrim"])
 
@@ -159,7 +161,7 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
 
             return {
                 "status": "success",
-                "item_id": item.get("id"),
+                "identifier": item.get("id"),
                 "sku": payload.get("code"),
                 "result": result,
             }
@@ -172,14 +174,14 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
                 extra={
                     "error": error_msg,
                     "payload": item,
-                    "item_id": item.get("id"),
+                    "identifier": item.get("id"),
                 },
             )
 
             return {
                 "status": "failed",
                 "error": error_msg,
-                "item_id": item.get("id"),
+                "identifier": item.get("id"),
                 "payload": item,
             }
 
@@ -189,14 +191,14 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
                 extra={
                     "error": str(e),
                     "payload": item,
-                    "item_id": item.get("id"),
+                    "identifier": item.get("id"),
                 },
             )
 
             return {
                 "status": "failed",
                 "error": str(e),
-                "item_id": item.get("id"),
+                "identifier": item.get("id"),
                 "payload": item,
             }
 
@@ -215,7 +217,7 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
     failed = len(failed_results)
     failed_details = [
         {
-            "item_id": r["item_id"],
+            "identifier": r["identifier"],
             "reason": r["error"],
         }
         for r in failed_results
@@ -244,10 +246,42 @@ async def create_item():
     """
 
     try:
+        started_at = datetime.utcnow()
         items = await api_get("/api/v2/item")
 
+        # Count total items fetched
+        total_fetched = len(items.get("data", []))
+        
         sync_result = await sync_items_to_stocktrim(items)
 
+        completed_at = datetime.utcnow()
+        
+        # Build entities array for email template
+        entities = [
+            {
+                "name": "Items",
+                "fetched": total_fetched,
+                "synced": sync_result["success"],
+                "failed": sync_result["failed"],
+            }
+        ]
+        
+        # Build summary text
+        summary_text = f"Synced {sync_result['success']} item(s) successfully. {sync_result['failed']} failed."
+        
+        email_data = generate_scan_complete_email(
+            email_to=["muhtashim@segwayz.com", "muhammadhamzatalat@gmail.com"],
+            started_at=started_at,
+            completed_at=completed_at,
+            summary_text=summary_text,
+            entities=entities,
+            total_failed=sync_result["failed"],
+        )
+        send_email(
+            email_to=["muhtashim@segwayz.com", "muhammadhamzatalat@gmail.com"],
+            subject=email_data.subject,
+            html_content=email_data.html_content,
+        )
         return {
             "item_sync_result": sync_result
         }

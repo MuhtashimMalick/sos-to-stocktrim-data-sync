@@ -1,0 +1,86 @@
+<mjml>
+  <mj-head>
+    <mj-title>Sync Complete</mj-title>
+    <mj-attributes>
+      <mj-all font-family="Helvetica, Arial, sans-serif" />
+      <mj-text font-size="14px" color="#333333" line-height="1.6" />
+    </mj-attributes>
+  </mj-head>
+  <mj-body background-color="#f4f4f4">
+
+    <!-- Header / Logo -->
+    <mj-section background-color="#1a1a2e" padding="20px 0">
+      <mj-column>
+        <mj-text align="center" color="#ffffff" font-size="22px" font-weight="bold">
+          Segwayz
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- Main Content -->
+    <mj-section background-color="#ffffff" padding="30px 25px 10px 25px">
+      <mj-column>
+        <mj-text font-size="18px" font-weight="bold" color="#1a1a2e">
+          {{ sync_title }}
+        </mj-text>
+        <mj-text>
+          {{ intro_text }}
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- Sync Summary Table -->
+    <mj-section background-color="#ffffff" padding="0 25px 10px 25px">
+      <mj-column>
+        <mj-text font-size="16px" font-weight="bold" color="#1a1a2e" padding-bottom="5px">
+          Summary
+        </mj-text>
+        <mj-table>
+          <tr style="background-color:#f8f8f8; text-align:left;">
+            <th style="padding: 8px; font-size: 13px; color: #888888;">Entity</th>
+            <th style="padding: 8px; font-size: 13px; color: #888888;">Fetched</th>
+            <th style="padding: 8px; font-size: 13px; color: #888888;">Synced</th>
+            <th style="padding: 8px; font-size: 13px; color: #888888;">Failed</th>
+          </tr>
+          {% for entity in entities %}
+          <tr style="border-bottom:1px solid #eeeeee; text-align:left;">
+            <td style="padding: 8px; font-weight: bold;">{{ entity.name }}</td>
+            <td style="padding: 8px;">{{ entity.fetched }}</td>
+            <td style="padding: 8px; color: #27ae60;">{{ entity.synced }}</td>
+            <td style="padding: 8px; color: {{ '#c0392b' if entity.failed > 0 else '#999999' }}; font-weight: {{ 'bold' if entity.failed > 0 else 'normal' }};">{{ entity.failed }}</td>
+          </tr>
+          {% endfor %}
+        </mj-table>
+      </mj-column>
+    </mj-section>
+
+    <!-- Timing -->
+    <mj-section background-color="#ffffff" padding="0 25px 10px 25px">
+      <mj-column>
+        <mj-table>
+          <tr style="border-bottom:1px solid #eeeeee; text-align:left;">
+            <th style="padding: 8px 0; color: #888888; font-size: 13px;">Started At</th>
+            <td style="padding: 8px 0;">{{ started_at }}</td>
+          </tr>
+          <tr style="text-align:left;">
+            <th style="padding: 8px 0; color: #888888; font-size: 13px;">Completed At</th>
+            <td style="padding: 8px 0;">{{ completed_at }}</td>
+          </tr>
+        </mj-table>
+      </mj-column>
+    </mj-section>
+
+    <!-- Footer -->
+    <mj-section background-color="#f4f4f4" padding="20px 25px">
+      <mj-column>
+        <mj-text align="center" font-size="12px" color="#999999">
+          This is an automated notification from {{ project_name }}. Please do not reply to this email.
+        </mj-text>
+        <mj-text align="center" font-size="12px" color="#999999">
+          &copy; {{ current_year }} Segwayz &mdash; <a href="https://segwayz.com" style="color:#999999;">segwayz.com</a>
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+  </mj-body>
+</mjml>

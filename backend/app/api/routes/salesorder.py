@@ -1,14 +1,17 @@
 import asyncio
 import logging
 
+from datetime import datetime
 from typing import Any, Optional, List
 
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Query
+from tenacity import RetryError
 
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
 from app.logging_config import get_jsonl_logger, build_jsonl_entry
+from app.utils import generate_scan_complete_email, send_email
 
 router = APIRouter(prefix="/salesorder", tags=["salesorder"])
 # --- SOS Nested Model
@@ -72,15 +75,15 @@ class SOSSalesOrderRequest(BaseModel):
 
 # --- Mapper ---
 
-def map_sos_order_to_stocktrim(data: SOSSalesOrderRequest) -> dict:
+def map_sos_order_to_stocktrim(data: SOSSalesOrderRequest) -> List[dict]:
     """
-    Maps a SOS sales order to StockTrim format.
-    One StockTrim request is created per sales order with all line items grouped.
+    Flattens SOS order lines into individual StockTrim sales order records.
+    One StockTrim record is created per line item.
     """
-    line_items = []
+    records = []
 
     for line in data.lines or []:
-        line_items.append({
+        records.append({
             "productId": str(line.item.id) if line.item else None,
             "externalReferenceId": data.number,
             "orderDate": data.date,
@@ -92,17 +95,10 @@ def map_sos_order_to_stocktrim(data: SOSSalesOrderRequest) -> dict:
             "customerName": data.customer.name if data.customer else None,
         })
 
-    return {
-        "orderDate": data.date,
-        "locationCode": str(data.location.id) if data.location else None,
-        "locationName": data.location.name if data.location else None,
-        "customerCode": str(data.customer.id) if data.customer else None,
-        "customerName": data.customer.name if data.customer else None,
-        "saleOrderLineItems": line_items,
-    }
+    return records
 
 
-STOCKTRIM_CONCURRENCY = 5
+STOCKTRIM_CONCURRENCY = 10
 logger = logging.getLogger(__name__)
 jsonl_logger = get_jsonl_logger()
 
@@ -119,39 +115,70 @@ async def sync_sales_orders_to_stocktrim(
                 saleorder
             )
 
-            payload = map_sos_order_to_stocktrim(verified_saleorder)
+            stocktrim_payloads = map_sos_order_to_stocktrim(
+                verified_saleorder
+            )
 
-            try:
-                print(payload,"payload")
-                async with semaphore:
-                    result = await client.create_resource(
-                        method="POST",
-                        endpoint="SalesOrdersBulk",
-                        payload=payload,
+            payload_results = []
+
+            # One SOS sales order may create multiple StockTrim payloads
+            for payload in stocktrim_payloads:
+
+                try:
+                    async with semaphore:
+                        result = await client.create_resource(
+                            method="POST",
+                            endpoint="SalesOrders",
+                            payload=payload,
+                        )
+
+                    payload_results.append({
+                        "status": "success",
+                        "result": result,
+                        "identifier": payload.get("salesOrderNumber"),
+                    })
+
+                except RetryError as re:
+                    cause = re.last_attempt.exception()
+                    error_msg = f"{type(cause).__name__}: {cause}"
+                    logger.error(
+                        f"Failed to sync sales order payload to StockTrim after retries: {error_msg}",
+                        extra={
+                            "error": error_msg,
+                            "payload": payload,
+                            "identifier": payload.get("salesOrderNumber"),
+                        },
                     )
 
-                return {
-                    "status": "success",
-                    "result": result,
-                    "sales_order_number": verified_saleorder.number,
-                }
+                    payload_results.append({
+                        "status": "failed",
+                        "error": error_msg,
+                        "payload": payload,
+                        "identifier": payload.get("salesOrderNumber"),
+                    })
 
-            except Exception as e:
-                logger.error(
-                    f"Failed to sync sales order to StockTrim {str(e)}",
-                    extra={
+                except Exception as e:
+                    logger.error(
+                        f"Failed to sync sales order payload to StockTrim {str(e)}",
+                        extra={
+                            "error": str(e),
+                            "payload": payload,
+                            "identifier": payload.get("salesOrderNumber"),
+                        },
+                    )
+
+                    payload_results.append({
+                        "status": "failed",
                         "error": str(e),
                         "payload": payload,
-                        "sales_order_number": verified_saleorder.number,
-                    },
-                )
+                        "identifier": payload.get("salesOrderNumber"),
+                    })
 
-                return {
-                    "status": "failed",
-                    "error": str(e),
-                    "payload": payload,
-                    "sales_order_number": verified_saleorder.number,
-                }
+            return {
+                "status": "completed",
+                "results": payload_results,
+                "identifier": saleorder.get("number"),
+            }
 
         except Exception as e:
             logger.error(
@@ -166,6 +193,7 @@ async def sync_sales_orders_to_stocktrim(
                 "status": "failed",
                 "error": str(e),
                 "sales_order": saleorder,
+                "identifier": saleorder.get("number"),
             }
 
     tasks = [
@@ -177,20 +205,38 @@ async def sync_sales_orders_to_stocktrim(
 
     success = 0
     failed = 0
+    failed_details = []
 
     for order in results:
-
+        # If the order itself failed at validation level
         if order["status"] == "failed":
+            failed_details.append({
+                "identifier": order.get("identifier"),
+                "error_type": "validation",
+                "reason": order.get("error"),
+            })
             failed += 1
         else:
-            success += 1
+            # Order succeeded at validation, but check individual payload results
+            for payload_result in order.get("results", []):
+                if payload_result["status"] == "failed":
+                    failed += 1
+                    failed_details.append({
+                        "identifier": order.get("identifier"),
+                        "error_type": "payload_sync",
+                        "product_id": payload_result.get("payload", {}).get("productId"),
+                        "reason": payload_result.get("error"),
+                    })
+                else:
+                    success += 1
 
     jsonl_logger.info(
         build_jsonl_entry(
             action_type=f"Sync sales orders from SOS Inventory to StockTrim",
             action_variant=f"sync-sales-orders-from-sos-to-stocktrim",
             status="Info",
-            message=f"Synced {success} sales orders successfully, {failed} failed.",
+            message=f"Synced {success} line items successfully, {failed} failed.",
+            failed_details=failed_details if failed_details else None,
         )
     )
 
@@ -213,6 +259,7 @@ async def create_sales_order(
 ):
 
     try:
+        started_at = datetime.utcnow()
         params = {
             "archived": "yes" if archived else "no",
             "from": f"{from_date}T00:00:00" if from_date else None,
@@ -220,10 +267,39 @@ async def create_sales_order(
         }
         sales_orders = await api_get("/api/v2/salesorder", params=params)
 
-        result = await sync_sales_orders_to_stocktrim(
-            sales_orders
-        )
+        # Count total sales orders fetched
+        total_fetched = len(sales_orders.get("data", []))
+        
+        result = await sync_sales_orders_to_stocktrim(sales_orders)
 
+        completed_at = datetime.utcnow()
+        
+        # Build entities array for email template
+        entities = [
+            {
+                "name": "Sales Orders",
+                "fetched": total_fetched,
+                "synced": result["success"],
+                "failed": result["failed"],
+            }
+        ]
+        
+        # Build summary text
+        summary_text = f"Synced {result['success']} line item(s) successfully. {result['failed']} failed."
+        
+        email_data = generate_scan_complete_email(
+            email_to=["muhtashim@segwayz.com", "muhammadhamzatalat@gmail.com"],
+            started_at=started_at,
+            completed_at=completed_at,
+            summary_text=summary_text,
+            entities=entities,
+            total_failed=result["failed"],
+        )
+        send_email(
+            email_to=["muhtashim@segwayz.com", "muhammadhamzatalat@gmail.com"],
+            subject=email_data.subject,
+            html_content=email_data.html_content,
+        )
         return {
             "sales_order_sync_result": result
         }

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from datetime import datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel
@@ -10,6 +11,7 @@ from tenacity import RetryError
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
 from app.logging_config import get_jsonl_logger, build_jsonl_entry
+from app.utils import generate_scan_complete_email, send_email
 
 router = APIRouter(prefix="/location", tags=["location"])
 
@@ -89,7 +91,7 @@ async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
                 extra={
                     "error": error_msg,
                     "payload": payload,
-                    "location_code": location.get("locationCode"),
+                    "identifier": location.get("locationCode"),
                 },
             )
 
@@ -97,7 +99,7 @@ async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
                 "status": "failed",
                 "error": error_msg,
                 "payload": payload,
-                "location_code": location.get("locationCode"),
+                "identifier": location.get("locationCode"),
             }
 
         except Exception as e:
@@ -106,7 +108,7 @@ async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
                 extra={
                     "error": str(e),
                     "payload": payload,
-                    "location_code": location.get("locationCode"),
+                    "identifier": location.get("locationCode"),
                 },
             )
 
@@ -114,7 +116,7 @@ async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
                 "status": "failed",
                 "error": str(e),
                 "payload": payload,
-                "location_code": location.get("locationCode"),
+                "identifier": location.get("locationCode"),
             }
 
     tasks = [process_location(l) for l in locations["data"]]
@@ -126,7 +128,7 @@ async def sync_location_to_stocktrim(locations: dict[str, Any | list]):
     failed = len(failed_results)
     failed_details = [
         {
-            "location_code": r["location_code"],
+            "identifier": r["identifier"],
             "reason": r["error"],
         }
         for r in failed_results
@@ -160,13 +162,46 @@ async def create_location():
     """
 
     try:
+        started_at = datetime.utcnow()
         locations = await api_get("/api/v2/location")
 
+        # Count total locations fetched
+        total_fetched = len(locations.get("data", []))
+        
         sync_result = await sync_location_to_stocktrim(locations)
 
+        completed_at = datetime.utcnow()
+        
+        # Build entities array for email template
+        entities = [
+            {
+                "name": "Locations",
+                "fetched": total_fetched,
+                "synced": sync_result["success"],
+                "failed": sync_result["failed"],
+            }
+        ]
+        
+        # Build summary text
+        summary_text = f"Synced {sync_result['success']} location(s) successfully. {sync_result['failed']} failed."
+        
+        email_data = generate_scan_complete_email(
+            email_to=["muhtashim@segwayz.com", "muhammadhamzatalat@gmail.com"],
+            started_at=started_at,
+            completed_at=completed_at,
+            summary_text=summary_text,
+            entities=entities,
+            total_failed=sync_result["failed"],
+        )
+        send_email(
+            email_to=["muhtashim@segwayz.com", "muhammadhamzatalat@gmail.com"],
+            subject=email_data.subject,
+            html_content=email_data.html_content,
+        )
         return {
             "location_sync_result": sync_result
         }
 
     except Exception as e:
+        logger.error(f"Error syncing locations: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 type LogLevel = "Success" | "Info" | "Error";
 
 interface FailedDetail {
-  purchase_order_number: string;
+  identifier: string;
   reason: string;
 }
 
@@ -41,7 +41,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "locations",
     label: "Sync Locations",
-    endpoint: "http://146.190.210.58:8000/api/v1/location/create-location",
+    endpoint: "http://localhost:8000/api/v1/location/create-location",
     method: "POST",
     startMsg: "Syncing locations...",
     successMsg: "Locations synced successfully.",
@@ -49,7 +49,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "suppliers",
     label: "Sync Suppliers",
-    endpoint: "http://146.190.210.58:8000/api/v1/supplier/create-supplier",
+    endpoint: "http://localhost:8000/api/v1/supplier/create-supplier",
     method: "POST",
     startMsg: "Syncing suppliers...",
     successMsg: "Suppliers synced successfully.",
@@ -57,7 +57,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "customers",
     label: "Sync Customers",
-    endpoint: "http://146.190.210.58:8000/api/v1/customer/create-customer",
+    endpoint: "http://localhost:8000/api/v1/customer/create-customer",
     method: "PUT",
     startMsg: "Syncing customers...",
     successMsg: "Customers synced successfully.",
@@ -65,7 +65,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "products",
     label: "Sync Products",
-    endpoint: "http://146.190.210.58:8000/api/v1/stocktrim/create-item",
+    endpoint: "http://localhost:8000/api/v1/stocktrim/create-item",
     method: "POST",
     startMsg: "Syncing products...",
     successMsg: "Products synced successfully.",
@@ -73,7 +73,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "purchase_orders",
     label: "Sync Purchase Orders",
-    endpoint: "http://146.190.210.58:8000/api/v1/purchaseorder/sync-from-sos",
+    endpoint: "http://localhost:8000/api/v1/purchaseorder/sync-from-sos",
     method: "POST",
     startMsg: "Syncing purchase orders...",
     successMsg: "Purchase orders synced successfully.",
@@ -81,7 +81,7 @@ const INDIVIDUAL_SYNCS: {
   {
     key: "sales_orders",
     label: "Sync Sales Orders",
-    endpoint: "http://146.190.210.58:8000/api/v1/salesorder/create-sales-order",
+    endpoint: "http://localhost:8000/api/v1/salesorder/create-sales-order",
     method: "POST",
     startMsg: "Syncing sales orders...",
     successMsg: "Sales orders synced successfully.",
@@ -215,7 +215,7 @@ const SettingsModal = ({ onClose }: { onClose: () => void }) => {
   useEffect(() => {
     const loadPreferences = async () => {
       try {
-        const response = await fetch("http://146.190.210.58:8000/api/v1/users/me/preference");
+        const response = await fetch("http://localhost:8000/api/v1/users/me/preference");
         if (!response.ok) throw new Error("Failed to load preferences");
         const data = await response.json();
         setFrequency(minutesToFrequency(data.sync_after_mins));
@@ -233,7 +233,7 @@ const SettingsModal = ({ onClose }: { onClose: () => void }) => {
     try {
       setSaving(true);
       console.log(JSON.stringify({ sync_after_mins: frequencyToMinutes[frequency], enable_auto_sync: autoSync }))
-      const response = await fetch("http://146.190.210.58:8000/api/v1/users/me/preference", {
+      const response = await fetch("http://localhost:8000/api/v1/users/me/preference", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sync_after_mins: frequencyToMinutes[frequency], enable_auto_sync: autoSync }),
@@ -496,7 +496,7 @@ const FailedDetailsModal = ({
 
   const filtered = details.filter(
     (d) =>
-      d.purchase_order_number?.toLowerCase().includes(search.toLowerCase()) ||
+      String(d.identifier)?.toLowerCase().includes(search.toLowerCase()) ||
       d.reason?.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -557,7 +557,7 @@ const FailedDetailsModal = ({
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                   >
                     <td style={{ padding: "12px 28px", fontWeight: 600, color: "#1E293B", verticalAlign: "top", whiteSpace: "nowrap" }}>
-                      {d.purchase_order_number ?? "—"}
+                      {d.identifier ?? "—"}
                     </td>
                     <td style={{ padding: "12px 28px 12px 0", color: "#dc2626", fontFamily: "ui-monospace, monospace", fontSize: 12, lineHeight: 1.6, wordBreak: "break-word", verticalAlign: "top" }}>
                       {d.reason}
@@ -580,6 +580,82 @@ const FailedDetailsModal = ({
   );
 };
 
+const LogHistoryModal = ({
+  date,
+  logs,
+  loading,
+  error,
+  onClose,
+  onShowFailures,
+}: {
+  date: string;
+  logs: LogEntry[];
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onShowFailures: (details: FailedDetail[], actionType: string) => void;
+}) => (
+  <div
+    style={{ position: "fixed", inset: 0, zIndex: 55, background: "rgba(30,41,59,0.45)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.15s ease" }}
+    onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+  >
+    <div style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 720, maxHeight: "80vh", margin: "0 16px", boxShadow: "0 20px 60px rgba(30,41,59,0.18)", display: "flex", flexDirection: "column", overflow: "hidden", animation: "slideUp 0.2s ease" }}>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "22px 28px", borderBottom: "1px solid #f1f5f9", flexShrink: 0 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#1E293B" }}>Logs — {date}</h2>
+        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#64748B", padding: 4, borderRadius: 6, display: "flex", alignItems: "center" }}>
+          <XIcon />
+        </button>
+      </div>
+
+      <div style={{ overflowY: "auto", flex: 1, padding: "8px 0" }}>
+        {loading ? (
+          <div style={{ padding: "32px 28px", display: "flex", alignItems: "center", gap: 10, color: "#64748B", fontSize: 14 }}>
+            <Spinner size={16} color="#64748B" /> Loading logs...
+          </div>
+        ) : error ? (
+          <div style={{ padding: "24px 28px", color: "#dc2626", fontSize: 14 }}>{error}</div>
+        ) : logs.length === 0 ? (
+          <div style={{ padding: "32px 28px", color: "#94a3b8", fontSize: 14, textAlign: "center" }}>
+            No log entries for this date.
+          </div>
+        ) : (
+          logs.map((log, i) => (
+            <div
+              key={log.id}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 28px", borderBottom: i < logs.length - 1 ? "1px solid #f8fafc" : "none", gap: 16, flexWrap: "wrap" }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 16, flex: 1, minWidth: 0 }}>
+                <Badge level={log.status} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 3, fontWeight: 500 }}>{log.actionType}</div>
+                  <div style={{ fontSize: 14, color: log.status === "Error" ? "#1E293B" : "#374151", fontWeight: log.status === "Error" ? 600 : 400 }}>
+                    {log.message}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                {log.failedDetails && log.failedDetails.length > 0 && (
+                  <button
+                    onClick={() => onShowFailures(log.failedDetails!, log.actionType)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1.5px solid rgba(239,68,68,0.2)", padding: "5px 12px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
+                  >
+                    <ErrorCircleIcon />
+                    {log.failedDetails.length} {log.failedDetails.length === 1 ? "failure" : "failures"}
+                  </button>
+                )}
+                <span style={{ fontSize: 13, color: "#94a3b8", whiteSpace: "nowrap" }}>
+                  {new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  </div>
+);
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -599,6 +675,12 @@ export default function App() {
   const [logsLoading, setLogsLoading] = useState(true);
   const [logsError, setLogsError] = useState<string | null>(null);
 
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [historyModal, setHistoryModal] = useState<{ date: string; logs: LogEntry[] } | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [dateDropdownOpen, setDateDropdownOpen] = useState(false);
+
   const visibleLogs = showAll ? logs : logs.slice(0, COLLAPSED_COUNT);
   const isBusy = syncingKey !== null;
 
@@ -611,6 +693,8 @@ export default function App() {
       setDateError(null);
     }
   }, [fromDate, toDate, archived]);
+
+  useEffect(() => { fetchAvailableDates(); }, []);
 
   // ── Validate before running an archived sync (only for supported keys) ──
   const archivedReady = (key: SyncKey): boolean => {
@@ -639,7 +723,7 @@ export default function App() {
     setLogsLoading(true);
     setLogsError(null);
     try {
-      const res = await fetch("http://146.190.210.58:8000/api/v1/logs/today");
+      const res = await fetch("http://localhost:8000/api/v1/logs/today");
       if (!res.ok) throw new Error(`Failed to fetch logs (HTTP ${res.status})`);
       const data: LogEntry[] = await res.json();
       setLogs(data);
@@ -650,6 +734,34 @@ export default function App() {
     }
   };
 
+  // ─── Fetch available log dates ──
+  const fetchAvailableDates = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/api/v1/logs/dates");
+      if (!res.ok) throw new Error("Failed to fetch log dates");
+      const data: string[] = await res.json();
+      setAvailableDates(data);
+    } catch (err) {
+      console.error("Error fetching log dates:", err);
+    }
+  };
+
+  // ─── Fetch logs for a selected date ──
+  const fetchLogsForDate = async (date: string) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const res = await fetch(`http://localhost:8000/api/v1/logs/${date}`);
+      if (!res.ok) throw new Error(`Failed to fetch logs (HTTP ${res.status})`);
+      const data: LogEntry[] = await res.json();
+      setHistoryModal({ date, logs: data });
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "Could not load logs.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   useEffect(() => { fetchLogs(); }, []);
 
   useEffect(() => {
@@ -657,7 +769,7 @@ export default function App() {
   }, [syncingKey]);
 
   useEffect(() => {
-    const interval = setInterval(fetchLogs, 10_000);
+    const interval = setInterval(fetchLogs, 20_000);
     return () => clearInterval(interval);
   }, []);
 
@@ -708,7 +820,7 @@ export default function App() {
   const handleSync = () =>
     runSync(
       "all",
-      "http://146.190.210.58:8000/api/v1/sos-stocktrim/sync-all-data-to-stocktrim/",
+      "http://localhost:8000/api/v1/sos-stocktrim/sync-all-data-to-stocktrim/",
       "POST",
       "Syncing all data to StockTrim...",
       "All data synced to StockTrim successfully.",
@@ -899,6 +1011,38 @@ export default function App() {
                 </span>
                 Refresh
               </button>
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setDateDropdownOpen((o) => !o)}
+                  style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "1.5px solid #e2e8f0", borderRadius: 7, padding: "5px 12px", cursor: "pointer", color: "#64748B", fontSize: 13, fontWeight: 600, fontFamily: "Inter, sans-serif", transition: "all 0.15s" }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#cbd5e1"; e.currentTarget.style.color = "#1E293B"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.color = "#64748B"; }}
+                >
+                  <CalendarIcon />
+                  View Past Logs
+                  <ChevronDownIcon open={dateDropdownOpen} />
+                </button>
+
+                {dateDropdownOpen && (
+                  <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, minWidth: 180, background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 8, boxShadow: "0 8px 24px rgba(30,41,59,0.12)", zIndex: 10, overflow: "hidden", maxHeight: 280, overflowY: "auto" }}>
+                    {availableDates.length === 0 ? (
+                      <div style={{ padding: "12px 16px", fontSize: 13, color: "#94a3b8" }}>No logs available</div>
+                    ) : (
+                      availableDates.map((date) => (
+                        <button
+                          key={date}
+                          onClick={() => { setDateDropdownOpen(false); fetchLogsForDate(date); }}
+                          style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 16px", background: "#fff", border: "none", cursor: "pointer", fontSize: 13, color: "#1E293B", fontFamily: "Inter, sans-serif", transition: "background 0.1s" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+                        >
+                          {date}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -977,6 +1121,16 @@ export default function App() {
           details={failureModal.details}
           actionType={failureModal.actionType}
           onClose={() => setFailureModal(null)}
+        />
+      )}
+      {historyModal && (
+        <LogHistoryModal
+          date={historyModal.date}
+          logs={historyModal.logs}
+          loading={historyLoading}
+          error={historyError}
+          onClose={() => setHistoryModal(null)}
+          onShowFailures={(details, actionType) => setFailureModal({ details, actionType })}
         />
       )}
     </>

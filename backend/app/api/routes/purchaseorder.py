@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from datetime import datetime
 from typing import Any, Optional, List
 
 from pydantic import BaseModel
@@ -9,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.api.routes.stocktrim import client
 from app.sos_stocktrim_sync.utils import api_get
 from app.logging_config import get_jsonl_logger, build_jsonl_entry
+from app.utils import generate_scan_complete_email, send_email
 from tenacity import RetryError
 
 router = APIRouter(prefix="/purchaseorder", tags=["purchaseorder"])
@@ -285,7 +287,7 @@ async def sync_purchase_orders_to_stocktrim(
 
             return {
                 "status": "success",
-                "purchase_order_number": payload.get("purchaseOrderNumber"),
+                "identifier": payload.get("purchaseOrderNumber"),
                 "stocktrim_status": payload.get("status"),
                 "result": result,
             }
@@ -300,7 +302,7 @@ async def sync_purchase_orders_to_stocktrim(
                 extra={
                     "error": error_msg,
                     "payload": payload,
-                    "purchase_order_number": payload.get("purchaseOrderNumber"),
+                    "identifier": payload.get("purchaseOrderNumber"),
                 },
             )
 
@@ -308,7 +310,7 @@ async def sync_purchase_orders_to_stocktrim(
                 "status": "failed",
                 "error": error_msg,  # now contains the real cause, not RetryError string
                 "payload": payload,
-                "purchase_order_number": payload.get("purchaseOrderNumber"),
+                "identifier": payload.get("purchaseOrderNumber"),
             }
 
         except Exception as e:
@@ -319,7 +321,7 @@ async def sync_purchase_orders_to_stocktrim(
                 extra={
                     "error": str(e),
                     "payload": payload,
-                    "purchase_order_number": payload.get("purchaseOrderNumber"),
+                    "identifier": payload.get("purchaseOrderNumber"),
                 },
             )
 
@@ -327,7 +329,7 @@ async def sync_purchase_orders_to_stocktrim(
                 "status": "failed",
                 "error": str(e),
                 "payload": payload,
-                "purchase_order_number": payload.get("purchaseOrderNumber"),
+                "identifier": payload.get("purchaseOrderNumber"),
             }
 
     tasks = [
@@ -344,7 +346,7 @@ async def sync_purchase_orders_to_stocktrim(
     failed = len(failed_results)
     failed_details = [
         {
-            "purchase_order_number": r["purchase_order_number"],
+            "identifier": r["identifier"],
             "reason": r["error"],
         }
         for r in failed_results
@@ -378,18 +380,49 @@ async def sync_purchase_order_from_sos(
     """
 
     try:
+        started_at = datetime.utcnow()
         params = {
             "archived": "yes" if archived else "no",
             "from": f"{from_date}T00:00:00" if from_date else None,
             "to": f"{to_date}T23:59:59" if to_date else None
         }
         purchase_orders = await api_get("/api/v2/purchaseorder", params=params)
-        # Limit to 5 purchase orders
+        
+        # Count total purchase orders fetched
+        total_fetched = len(purchase_orders.get("data", []))
+        
+        # Limit to purchase orders
         purchase_orders["data"] = purchase_orders["data"]
-        sync_result = await sync_purchase_orders_to_stocktrim(
-            purchase_orders
-        )
+        sync_result = await sync_purchase_orders_to_stocktrim(purchase_orders)
 
+        completed_at = datetime.utcnow()
+        
+        # Build entities array for email template
+        entities = [
+            {
+                "name": "Purchase Orders",
+                "fetched": total_fetched,
+                "synced": sync_result["success"],
+                "failed": sync_result["failed"],
+            }
+        ]
+        
+        # Build summary text
+        summary_text = f"Synced {sync_result['success']} purchase order(s) successfully. {sync_result['failed']} failed."
+        
+        email_data = generate_scan_complete_email(
+            email_to=["muhtashim@segwayz.com", "muhammadhamzatalat@gmail.com"],
+            started_at=started_at,
+            completed_at=completed_at,
+            summary_text=summary_text,
+            entities=entities,
+            total_failed=sync_result["failed"],
+        )
+        send_email(
+            email_to=["muhtashim@segwayz.com", "muhammadhamzatalat@gmail.com"],
+            subject=email_data.subject,
+            html_content=email_data.html_content,
+        )
         return {
             "purchase_order_sync_result": sync_result
         }

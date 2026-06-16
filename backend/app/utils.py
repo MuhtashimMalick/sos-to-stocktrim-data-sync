@@ -41,6 +41,7 @@ def send_email(
         subject=subject,
         html=html_content,
         mail_from=(settings.EMAILS_FROM_NAME, settings.EMAILS_FROM_EMAIL),
+        headers={"Reply-To": f"No-Reply <{settings.EMAILS_FROM_EMAIL}>"},
     )
     smtp_options = {"host": settings.SMTP_HOST, "port": settings.SMTP_PORT}
     if settings.SMTP_TLS:
@@ -121,3 +122,72 @@ def verify_password_reset_token(token: str) -> str | None:
         return str(decoded_token["sub"])
     except InvalidTokenError:
         return None
+
+
+def generate_scan_complete_email(
+    email_to: str,
+    started_at: datetime,
+    completed_at: datetime,
+    summary_text: str,
+    entities: list[dict[str, Any]] | None = None,
+    total_failed: int = 0,
+    failed: bool = False,
+) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    status = "Failed" if failed else "Completed"
+    subject = f"{project_name} - Sync {status.lower()}"
+
+    duration = str(completed_at - started_at)
+    
+    # Default entity if not provided
+    if entities is None:
+        entities = []
+
+    html_content = render_email_template(
+        template_name="sync_complete.html",
+        context={
+            "project_name": project_name,
+            "status": status,
+            "status_color": "#c0392b" if failed else "#27ae60",
+            "started_at": started_at.strftime("%b %d, %Y, %I:%M %p UTC"),
+            "completed_at": completed_at.strftime("%b %d, %Y, %I:%M %p UTC"),
+            "duration": duration,
+            "summary_text": summary_text,
+            "sync_title": f"Sync {status}",
+            "username": "User",
+            "intro_text": summary_text,
+            "entities": entities,
+            "total_failed": total_failed,
+            "link": settings.FRONTEND_HOST,
+            "current_year": datetime.now().year,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_scan_error_email(
+    email_to: str,
+    username: str,
+    scan_id: str,
+    started_at: datetime,
+    failed_at: datetime,
+    error_message: str,
+    link: str,
+) -> EmailData:
+    project_name = settings.PROJECT_NAME
+    subject = f"{project_name} - Scan failed ({scan_id})"
+
+    html_content = render_email_template(
+        template_name="scan_error.html",
+        context={
+            "project_name": project_name,
+            "username": username,
+            "scan_id": scan_id,
+            "started_at": started_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "failed_at": failed_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "error_message": error_message,
+            "link": link,
+            "current_year": datetime.now().year,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
