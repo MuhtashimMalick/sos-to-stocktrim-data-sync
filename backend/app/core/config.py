@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str | None = None
     EMAILS_FROM_EMAIL: EmailStr | None = None
     EMAILS_FROM_NAME: str | None = None
+    RECIPIENTS_LIST: list[EmailStr] | None = None
 
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:

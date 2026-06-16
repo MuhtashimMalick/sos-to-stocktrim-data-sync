@@ -288,7 +288,7 @@ async def create_sales_order(
         summary_text = f"Synced {result['success']} line item(s) successfully. {result['failed']} failed."
         
         email_data = generate_scan_complete_email(
-            email_to=["muhtashim@segwayz.com", "muhammadhamzatalat@gmail.com"],
+            email_to=settings.RECIPIENTS_LIST,
             started_at=started_at,
             completed_at=completed_at,
             summary_text=summary_text,
@@ -296,7 +296,7 @@ async def create_sales_order(
             total_failed=result["failed"],
         )
         send_email(
-            email_to=["muhtashim@segwayz.com", "muhammadhamzatalat@gmail.com"],
+            email_to=settings.RECIPIENTS_LIST,
             subject=email_data.subject,
             html_content=email_data.html_content,
         )
