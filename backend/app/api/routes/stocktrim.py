@@ -91,6 +91,7 @@ class SOSItemRequest(BaseModel):
     id: int
     sku: str
     name: str
+    type: str
     description: Optional[str] = None
     barcode: Optional[str] = None
     leadTime: Optional[int] = 0
@@ -106,7 +107,11 @@ class SOSItemRequest(BaseModel):
     archived: Optional[bool] = False
     weight: Optional[float] = 0
 
-
+ALLOWED_ITEM_TYPES = {
+    "Inventory Item",
+    "Assembly",
+    "Kit",
+}
 def map_sos_to_stocktrim(data: SOSItemRequest) -> dict:
     payload = {
         "productId": data.id,
@@ -156,9 +161,44 @@ STOCKTRIM_CONCURRENCY = 10
 async def sync_items_to_stocktrim(items: dict[str, Any | list]):
     semaphore = asyncio.Semaphore(STOCKTRIM_CONCURRENCY)
 
+    # async def process_item(item):
+    #     try:
+    #         verified_item = SOSItemRequest.model_validate(item)
+
+    #         payload = map_sos_to_stocktrim(verified_item)
+
+    #         async with semaphore:
+    #             result = await client.create_resource(
+    #                 method="POST",
+    #                 endpoint="Products",
+    #                 payload=payload,
+    #             )
+
+    #         return {
+    #             "status": "success",
+    #             "identifier": item.get("id"),
+    #             "sku": payload.get("code"),
+    #             "result": result,
+    #         }
     async def process_item(item):
         try:
             verified_item = SOSItemRequest.model_validate(item)
+
+            # Skip unsupported item types
+            if verified_item.type not in ALLOWED_ITEM_TYPES:
+                logger.info(
+                    f"[SOS Sync] Skipping non-sellable item: "
+                    f"{verified_item.sku or 'no-sku'} "
+                    f"(Type: {verified_item.type})"
+                )
+
+                return {
+                    "status": "skipped",
+                    "identifier": verified_item.id,
+                    "sku": verified_item.sku,
+                    "type": verified_item.type,
+                    "reason": f"Unsupported item type '{verified_item.type}'",
+                }
 
             payload = map_sos_to_stocktrim(verified_item)
 
@@ -171,11 +211,10 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
 
             return {
                 "status": "success",
-                "identifier": item.get("id"),
-                "sku": payload.get("code"),
+                "identifier": verified_item.id,
+                "sku": verified_item.sku,
                 "result": result,
             }
-
         except RetryError as re:
             cause = re.last_attempt.exception()
             error_msg = f"{type(cause).__name__}: {cause}"
@@ -225,6 +264,18 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
 
     failed_results = [r for r in results if r["status"] == "failed"]
     failed = len(failed_results)
+
+    skipped_results = [r for r in results if r["status"] == "skipped"]
+    skipped = len(skipped_results)
+    skipped_details = [
+    {
+        "identifier": r["identifier"],
+        "sku": r["sku"],
+        "type": r["type"],
+        "reason": r["reason"],
+    }
+    for r in skipped_results
+    ]
     failed_details = [
         {
             "identifier": r["identifier"],
@@ -233,19 +284,36 @@ async def sync_items_to_stocktrim(items: dict[str, Any | list]):
         for r in failed_results
     ]
 
+    # jsonl_logger.info(
+    #     build_jsonl_entry(
+    #         action_type=f"Sync products from SOS Inventory to StockTrim",
+    #         action_variant=f"sync-products-from-sos-to-stocktrim",
+    #         status="Info",
+    #         message=f"Synced {success} products successfully, {failed} failed.",
+    #         failed_details=failed_details if failed_details else None,
+    #     )
+    # )
     jsonl_logger.info(
         build_jsonl_entry(
-            action_type=f"Sync products from SOS Inventory to StockTrim",
-            action_variant=f"sync-products-from-sos-to-stocktrim",
+            action_type="Sync products from SOS Inventory to StockTrim",
+            action_variant="sync-products-from-sos-to-stocktrim",
             status="Info",
-            message=f"Synced {success} products successfully, {failed} failed.",
-            failed_details=failed_details if failed_details else None,
+            message=(
+                f"Synced {success} products successfully, "
+                f"{failed} failed, "
+                f"{skipped} skipped."
+            ),
+            failed_details=(
+                failed_details + skipped_details
+                if (failed_details or skipped_details)
+                else None
+            ),
         )
     )
-
     return {
-        "success": success,
-        "failed": failed,
+    "success": success,
+    "failed": failed,
+    "skipped": skipped,
     }
 
 
