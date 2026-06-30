@@ -54,6 +54,7 @@ def send_email(
         smtp_options["password"] = settings.SMTP_PASSWORD
     response = message.send(to=email_to, smtp=smtp_options)
     logger.info(f"send email result: {response}")
+    logger.info(f"send email error: {response.error!r}")
 
 
 def generate_test_email(email_to: str) -> EmailData:

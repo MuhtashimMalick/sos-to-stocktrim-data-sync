@@ -47,24 +47,27 @@ class StockTrimClient:
         wait=wait_exponential(multiplier=0.5, min=0.5, max=3)
     )
     async def create_resource(self, method: str, endpoint: str, payload: Dict[str, Any] = None):
-        url = f"{self.base_url}/{endpoint}"
-        body_str = json.dumps(payload) if payload else ""
+        try:
+            url = f"{self.base_url}/{endpoint}"
+            body_str = json.dumps(payload) if payload else ""
 
-        headers = self._build_headers(method, endpoint, body_str)
+            headers = self._build_headers(method, endpoint, body_str)
 
-        response = await self.http.request(
-            method=method.upper(),
-            url=url,
-            json=payload if method.upper() in [
-                "POST", "PUT", "PATCH"] else None,
-            params=payload if method.upper() == "GET" else None,
-            headers=headers
-        )
+            response = await self.http.request(
+                method=method.upper(),
+                url=url,
+                json=payload if method.upper() in [
+                    "POST", "PUT", "PATCH"] else None,
+                params=payload if method.upper() == "GET" else None,
+                headers=headers
+            )
 
-        if response.status_code >= 400:
-            raise Exception(f"{response.status_code}: {response.text}")
-
-        return response.json()
+            if response.status_code >= 400:
+                raise Exception(f"{response.status_code}: {response.text}")
+            
+            return response.json()
+        except Exception as e:
+            logger.info(f"Error in create_resource: {str(e)}")
 
 
 client = StockTrimClient(
@@ -88,6 +91,7 @@ class SOSItemRequest(BaseModel):
     id: int
     sku: str
     name: str
+    description: Optional[str] = None
     barcode: Optional[str] = None
     leadTime: Optional[int] = 0
     onhand: Optional[float] = 0
@@ -104,10 +108,10 @@ class SOSItemRequest(BaseModel):
 
 
 def map_sos_to_stocktrim(data: SOSItemRequest) -> dict:
-    return {
+    payload = {
         "productId": data.id,
         "productCodeReadable": data.sku,
-        "name": data.name,
+        "name": data.description or data.name,
         "category": data.category.name if data.category else None,
         "subCategory": None,
         "leadTime": data.leadTime or 0,
@@ -126,7 +130,6 @@ def map_sos_to_stocktrim(data: SOSItemRequest) -> dict:
         "barcode": data.barcode,
         "discontinued": data.archived or False,
         "minimumShelfLevel": float(data.reorderPoint or 0),
-        "maximumShelfLevel": float(data.maxStock or 0),
         "weight": float(data.weight or 0),
         # Fields not available in SOS — set to defaults
         # "serviceLevel": 0,
@@ -138,6 +141,11 @@ def map_sos_to_stocktrim(data: SOSItemRequest) -> dict:
         # "unstocked": False,
         # "stockLocations": [],
     }
+
+    if data.maxStock is not None and data.maxStock > 0:
+        payload["maximumShelfLevel"] = float(data.maxStock)
+
+    return payload
 
 
 logger = logging.getLogger(__name__)

@@ -29,7 +29,7 @@ from app.models import (
     UserUpdateMe,
 )
 from app.utils import generate_new_account_email, send_email
-from app.core.scheduler import start_scheduler, shutdown_scheduler, register_job
+from app.core.scheduler import start_scheduler, shutdown_scheduler, reschedule_job, scheduler
 from app.api.routes.sos_stocktrim import sync_all_data_to_stocktrim
 
 
@@ -297,15 +297,15 @@ async def update_my_preferences(
     session.refresh(pref)
 
     if pref.enable_auto_sync:
-        await shutdown_scheduler()
         logger.info(f"Auto-sync enabled. Syncing every {pref.sync_after_mins} minutes.")
-        register_job(
+        reschedule_job(
             job_id="sync_all_data",
             func=sync_all_data_to_stocktrim,
             minutes=pref.sync_after_mins,
             name="Sync all data from SOS to StockTrim"
         )
-        await start_scheduler()
+        if not scheduler.running:
+            await start_scheduler()
     else:
         logger.info("Auto-sync disabled. Stopping scheduler.")
         await shutdown_scheduler()

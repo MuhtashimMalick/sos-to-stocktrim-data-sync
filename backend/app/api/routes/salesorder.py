@@ -87,7 +87,7 @@ def map_sos_order_to_stocktrim(data: SOSSalesOrderRequest) -> List[dict]:
     for line in data.lines or []:
         records.append({
             "productId": str(line.item.id) if line.item else None,
-            "externalReferenceId": data.number,
+            "externalReferenceId": f"{data.number}-{line.lineNumber}",
             "orderDate": data.date,
             "quantity": float(line.quantity or 0),
             "unitPrice": float(line.unitprice or 0),
@@ -141,6 +141,7 @@ async def sync_sales_orders_to_stocktrim(
                     })
 
                 except RetryError as re:
+                    logger.info(f"EXCEPTION 1: {re}")
                     cause = re.last_attempt.exception()
                     error_msg = f"{type(cause).__name__}: {cause}"
                     logger.error(
@@ -160,6 +161,7 @@ async def sync_sales_orders_to_stocktrim(
                     })
 
                 except Exception as e:
+                    logger.info(f"EXCEPTION 2: {e}")
                     logger.error(
                         f"Failed to sync sales order payload to StockTrim {str(e)}",
                         extra={
@@ -183,6 +185,7 @@ async def sync_sales_orders_to_stocktrim(
             }
 
         except Exception as e:
+            logger.info(f"EXCEPTION 3: {e}")
             logger.error(
                 "Failed to process sales order",
                 extra={

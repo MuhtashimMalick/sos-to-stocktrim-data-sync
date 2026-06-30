@@ -70,3 +70,18 @@ async def shutdown_scheduler() -> None:
 def get_scheduler():
     """Get the scheduler instance."""
     return scheduler
+
+
+def reschedule_job(job_id: str, func: Callable, minutes: int, name: str) -> None:
+    """Update an existing job's interval, or add it if not present."""
+    register_job(job_id, func, minutes, name)  # keep registry in sync
+
+    if scheduler.running:
+        scheduler.add_job(
+            func,
+            trigger=IntervalTrigger(minutes=minutes),
+            id=job_id,
+            name=name,
+            replace_existing=True
+        )
+        logger.info(f"Rescheduled job: {name} (ID: {job_id}, Interval: {minutes}min)")
